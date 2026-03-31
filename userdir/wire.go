@@ -4,17 +4,20 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"time"
 )
 
 const (
 	msgRegister   byte = 0x01
 	msgSearch     byte = 0x02
 	msgGetProfile byte = 0x03
+	msgGetMeta    byte = 0x04 // lightweight: returns username/fullname/avatar_sha256/updated_at, no avatar bytes
 
 	msgOK      byte = 0x81
 	msgError   byte = 0x82
 	msgResults byte = 0x83
 	msgProfile byte = 0x84
+	msgMeta    byte = 0x85 // response to msgGetMeta
 )
 
 const (
@@ -79,4 +82,43 @@ func writeError(w io.Writer, code uint16, msg string) error {
 	binary.BigEndian.PutUint16(p[2:4], uint16(len(b)))
 	copy(p[4:], b)
 	return writeFrame(w, msgError, p)
+}
+
+// parseGetMeta parses a msgGetMeta request — same wire format as msgGetProfile.
+// payload: [1B ver][32B pubkey]
+func parseGetMeta(payload []byte) (ver byte, pubkey [32]byte, err error) {
+	if len(payload) != 1+32 {
+		return 0, [32]byte{}, fmt.Errorf("invalid get_meta payload")
+	}
+	ver = payload[0]
+	copy(pubkey[:], payload[1:33])
+	return ver, pubkey, nil
+}
+
+// writeMetaResponse sends a msgMeta frame.
+// payload: [1B ver][32B pubkey][2B ulen][username][2B flen][fullname][32B avatar_sha256][8B updated_at_unix_sec]
+func writeMetaResponse(w io.Writer, p *Profile) error {
+	var buf []byte
+	buf = append(buf, 1)
+	buf = append(buf, p.PubKey[:]...)
+
+	tmp2 := make([]byte, 2)
+	ub := []byte(p.Username)
+	fb := []byte(p.FullName)
+
+	binary.BigEndian.PutUint16(tmp2, uint16(len(ub)))
+	buf = append(buf, tmp2...)
+	buf = append(buf, ub...)
+
+	binary.BigEndian.PutUint16(tmp2, uint16(len(fb)))
+	buf = append(buf, tmp2...)
+	buf = append(buf, fb...)
+
+	buf = append(buf, p.AvatarSHA256[:]...)
+
+	var ts [8]byte
+	binary.BigEndian.PutUint64(ts[:], uint64(p.UpdatedAt.Unix()))
+	buf = append(buf, ts[:]...)
+
+	return writeFrame(w, msgMeta, buf)
 }

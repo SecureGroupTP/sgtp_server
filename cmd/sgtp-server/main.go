@@ -1,4 +1,8 @@
 // Command sgtp-server runs the SGTP relay server.
+//
+// When PG_DSN is set the server also embeds the userdir handler on the same
+// port: connections whose first 32 bytes are all zero are transparently routed
+// to the userdir protocol instead of the relay.
 package main
 
 import (
@@ -12,6 +16,7 @@ import (
 	"time"
 
 	"github.com/SecureGroupTP/sgtp_server/server"
+	"github.com/SecureGroupTP/sgtp_server/userdir"
 )
 
 func main() {
@@ -25,10 +30,55 @@ func main() {
 	}
 
 	logger := log.New(os.Stdout, "", log.LstdFlags)
-	srv := server.New(addr, logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// ── Optional userdir (enabled when PG_DSN is set) ────────────────────────
+	var ud *userdir.Server
+	if dsn := os.Getenv("PG_DSN"); dsn != "" {
+		ttl, err := durationFromEnv("PROFILE_TTL", 24*time.Hour)
+		if err != nil {
+			logger.Fatalf("[server] invalid PROFILE_TTL: %v", err)
+		}
+		avatarMax, err := uint32FromEnv("AVATAR_MAX_BYTES", 33554432)
+		if err != nil {
+			logger.Fatalf("[server] invalid AVATAR_MAX_BYTES: %v", err)
+		}
+		searchMax, err := uint16FromEnv("SEARCH_MAX_RESULTS", 20)
+		if err != nil {
+			logger.Fatalf("[server] invalid SEARCH_MAX_RESULTS: %v", err)
+		}
+		cleanupEvery, err := durationFromEnv("CLEANUP_INTERVAL", 5*time.Minute)
+		if err != nil {
+			logger.Fatalf("[server] invalid CLEANUP_INTERVAL: %v", err)
+		}
+
+		store, err := userdir.OpenStore(ctx, dsn, ttl)
+		if err != nil {
+			logger.Fatalf("[server] userdir open store: %v", err)
+		}
+		defer store.Close()
+
+		ud, err = userdir.NewServer(userdir.Config{
+			Logger:         logger,
+			Store:          store,
+			AvatarMaxBytes: avatarMax,
+			SearchMax:      searchMax,
+			CleanupEvery:   cleanupEvery,
+		})
+		if err != nil {
+			logger.Fatalf("[server] userdir init: %v", err)
+		}
+		// Run the userdir cleanup loop only (no separate TCP listener).
+		go func() {
+			_ = ud.RunCleanupLoop(ctx)
+		}()
+
+		logger.Printf("[server] userdir enabled (inline mux on same port)")
+	}
+
+	srv := server.New(addr, logger, ud)
 
 	go func() {
 		<-ctx.Done()
@@ -64,4 +114,28 @@ func durationFromEnv(key string, def time.Duration) (time.Duration, error) {
 		return def, nil
 	}
 	return time.ParseDuration(v)
+}
+
+func uint32FromEnv(key string, def uint32) (uint32, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.ParseUint(v, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", key, err)
+	}
+	return uint32(n), nil
+}
+
+func uint16FromEnv(key string, def uint16) (uint16, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.ParseUint(v, 10, 16)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", key, err)
+	}
+	return uint16(n), nil
 }

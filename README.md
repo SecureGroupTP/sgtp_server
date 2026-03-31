@@ -1,15 +1,16 @@
 # SGTP Servers
 
-This repo contains:
+This repo contains two server binaries:
 
-- `sgtp-server`: SGTP relay (transparent frame forwarder).
-- `sgtp-userdir`: TCP user directory (username/fullname/pubkey/avatar) with Ed25519-signed updates and Postgres persistence.
+- `sgtp-server`: SGTP relay (transparent frame forwarder) with an **embedded user directory** on the same port.
+
+The user directory was previously a separate `sgtp-userdir` binary and service. It is now multiplexed directly into each relay server port — no extra port needed.
 
 ## Quick start (Docker Compose)
 
 Requirements: Docker + Docker Compose.
 
-Start everything:
+Copy `.env` and adjust ports if needed, then:
 
 ```bash
 docker compose up --build
@@ -17,26 +18,41 @@ docker compose up --build
 
 Note: both local `go test` and Docker builds require downloading Go modules (e.g. `pgx`) from the internet on first run.
 
-Services and default host ports:
+Services and default host ports (see `.env`):
 
-- `sgtp_chat` → `70/tcp`
-- `sgtp_voice` → `77/tcp`
-- `sgtp_userdir` → `7070/tcp`
-- `userdir_db` → internal Postgres (persisted via volume)
+- `sgtp_chat` → `250/tcp` — chat relay + userdir
+- `sgtp_voice` → `251/tcp` — voice relay + userdir
+- `userdir_db` → internal Postgres only (persisted via volume, `127.0.0.1:5432` on host)
 
-### Userdir env (configured in `docker-compose.yml`)
+## User directory: connecting on a relay port
 
-- `SERVER_PORT`: TCP port to listen on inside container (default in compose: `7070`)
-- `PG_DSN`: Postgres DSN, e.g. `postgres://userdir:userdir@userdir_db:5432/userdir?sslmode=disable`
-- `PROFILE_TTL`: how long profiles are kept (default: `24h`)
-- `AVATAR_MAX_BYTES`: max avatar size (default: `33554432` = 32 MiB)
-- `SEARCH_MAX_RESULTS`: hard cap for search responses (default: `20`)
-- `CLEANUP_INTERVAL`: how often expired rows are deleted (default: `5m`)
-- `SHUTDOWN_TIMEOUT`: graceful shutdown timeout (default: `10s`)
+To speak the userdir protocol, the client connects to any relay port (chat or voice) and sends **exactly 32 zero bytes** as a routing prefix before the first userdir frame:
 
-## `sgtp-userdir` wire protocol (TCP, binary, big-endian)
+```
+u8[32]  magic   // all 0x00 — signals userdir intent
+...             // normal userdir frames follow
+```
 
-All messages are framed as:
+The relay reads the first 32 bytes of every new connection. If they are all zero the connection is handed off to the userdir handler. Otherwise the bytes are treated as the first 32 bytes of an SGTP header (RoomUUID + ReceiverUUID) and the relay session proceeds as normal. The two protocols are fully compatible — a relay frame can never start with 32 zero bytes because that would mean both RoomUUID and ReceiverUUID are the broadcast/zero address.
+
+## Server env variables
+
+Relay-only (always required):
+
+- `SERVER_PORT` — TCP port inside the container (default: `7777`)
+- `SHUTDOWN_TIMEOUT` — graceful shutdown timeout (default: `10s`)
+
+User directory (enabled when `PG_DSN` is set; both `sgtp_chat` and `sgtp_voice` set it):
+
+- `PG_DSN` — Postgres DSN, e.g. `postgres://userdir:userdir@userdir_db:5432/userdir?sslmode=disable`
+- `PROFILE_TTL` — how long profiles are kept (default: `24h`)
+- `AVATAR_MAX_BYTES` — max avatar size (default: `33554432` = 32 MiB)
+- `SEARCH_MAX_RESULTS` — hard cap for search responses (default: `20`)
+- `CLEANUP_INTERVAL` — how often expired rows are deleted (default: `5m`)
+
+## Userdir wire protocol (binary, big-endian)
+
+After sending the 32-byte zero magic (see above), all messages are framed as:
 
 ```
 u32  frame_len         // number of bytes after this field
@@ -44,126 +60,152 @@ u8   msg_type
 ...  payload           // (frame_len - 1) bytes
 ```
 
-If `frame_len` exceeds the configured maximum (derived from `AVATAR_MAX_BYTES`), the connection is closed.
+If `frame_len` exceeds the configured maximum (derived from `AVATAR_MAX_BYTES`) the connection is closed.
 
 ### Message types
 
-- `0x01` REGISTER / UPDATE (signed)
-- `0x02` SEARCH
-- `0x03` GET_PROFILE
-- `0x81` OK (response)
-- `0x82` ERROR (response)
-- `0x83` SEARCH_RESULTS (response)
-- `0x84` PROFILE (response)
+| Type | Direction | Name |
+|------|-----------|------|
+| `0x01` | → server | REGISTER / UPDATE |
+| `0x02` | → server | SEARCH |
+| `0x03` | → server | GET_PROFILE |
+| `0x04` | → server | GET_META |
+| `0x81` | ← server | OK |
+| `0x82` | ← server | ERROR |
+| `0x83` | ← server | SEARCH_RESULTS |
+| `0x84` | ← server | PROFILE |
+| `0x85` | ← server | META |
 
-### REGISTER / UPDATE (`msg_type = 0x01`)
+---
 
-Semantics:
+### REGISTER / UPDATE (`0x01`)
 
-- Profile identity is the **public key** (`pubkey`).
-- Sending REGISTER again with the same `pubkey` overwrites `username`, `fullname`, and `avatar` (upsert).
-- Stored rows expire after `PROFILE_TTL`.
-
-Payload layout:
-
-```
-u8    version          // currently: 1
-u16   username_len
-u8[]  username         // UTF-8; must match: ^@[A-Za-z0-9_]{1,32}$
-u16   fullname_len
-u8[]  fullname         // UTF-8 (arbitrary string)
-u8[32] pubkey          // Ed25519 public key (raw 32 bytes)
-u32   avatar_len       // must be <= AVATAR_MAX_BYTES
-u8[]  avatar           // raw bytes
-u8    sig_alg          // currently: 1 (Ed25519)
-u8[64] signature       // Ed25519 signature
-```
-
-Signature verification:
-
-The server verifies Ed25519 over the following bytes:
-
-```
-signed = msg_type (1 byte) || payload_without_signature_bytes
-payload_without_signature_bytes = payload[0 : len(payload)-64]
-```
-
-I.e. everything in the payload **including** `sig_alg`, but excluding the final `signature[64]`.
-
-On success the server replies `OK`.
-
-### SEARCH (`msg_type = 0x02`)
-
-Case-insensitive substring search (no regex). The DB query is implemented via `position(lower(q) in lower(field)) > 0`.
+Profile identity is the **public key** (`pubkey`). Sending REGISTER again with the same `pubkey` overwrites `username`, `fullname`, and `avatar` (upsert). Stored rows expire after `PROFILE_TTL`.
 
 Payload:
 
 ```
-u8   version           // 1
+u8     version          // 1
+u16    username_len
+u8[]   username         // UTF-8; must match ^@[A-Za-z0-9_]{1,32}$
+u16    fullname_len
+u8[]   fullname         // UTF-8
+u8[32] pubkey           // Ed25519 public key
+u32    avatar_len       // must be <= AVATAR_MAX_BYTES
+u8[]   avatar
+u8     sig_alg          // 1 = Ed25519
+u8[64] signature
+```
+
+Signature covers: `msg_type (1 byte) || payload_without_last_64_bytes`.
+
+On success: `OK (0x81)`.
+
+---
+
+### SEARCH (`0x02`)
+
+Case-insensitive substring match on `username` and `fullname`.
+
+Request payload:
+
+```
+u8   version            // 1
 u16  query_len
-u8[] query             // UTF-8
-u16  limit             // server clamps to <= SEARCH_MAX_RESULTS
+u8[] query              // UTF-8
+u16  limit              // clamped to SEARCH_MAX_RESULTS
 ```
 
-Response `SEARCH_RESULTS (0x83)` payload:
+Response `SEARCH_RESULTS (0x83)`:
 
 ```
-u8   version           // 1
+u8   version            // 1
 u16  count
-repeat count times:
-  u8[32] pubkey
-  u16   username_len
-  u8[]  username
-  u16   fullname_len
-  u8[]  fullname
-  u8[32] avatar_sha256 // SHA-256 of avatar bytes (binary)
-```
-
-### GET_PROFILE (`msg_type = 0x03`)
-
-Payload:
-
-```
-u8    version          // 1
+// repeated count times:
 u8[32] pubkey
-```
-
-Response `PROFILE (0x84)` payload:
-
-```
-u8    version          // 1
-u8[32] pubkey
-u16   username_len
-u8[]  username
-u16   fullname_len
-u8[]  fullname
-u32   avatar_len
-u8[]  avatar
+u16    username_len
+u8[]   username
+u16    fullname_len
+u8[]   fullname
 u8[32] avatar_sha256
 ```
 
-### OK (`msg_type = 0x81`)
+---
 
-Payload:
+### GET_PROFILE (`0x03`)
+
+Returns the full profile including avatar bytes.
+
+Request payload:
 
 ```
-u16 msg_len
+u8     version          // 1
+u8[32] pubkey
+```
+
+Response `PROFILE (0x84)`:
+
+```
+u8     version          // 1
+u8[32] pubkey
+u16    username_len
+u8[]   username
+u16    fullname_len
+u8[]   fullname
+u32    avatar_len
+u8[]   avatar
+u8[32] avatar_sha256
+u64    updated_at       // Unix timestamp (seconds UTC)
+```
+
+---
+
+### GET_META (`0x04`)
+
+Lightweight lookup — returns identity fields and the last-update timestamp **without** sending avatar bytes. Use this to check whether a cached avatar is still current (compare `avatar_sha256`) before fetching the full profile.
+
+Request payload (same format as GET_PROFILE):
+
+```
+u8     version          // 1
+u8[32] pubkey
+```
+
+Response `META (0x85)`:
+
+```
+u8     version          // 1
+u8[32] pubkey
+u16    username_len
+u8[]   username
+u16    fullname_len
+u8[]   fullname
+u8[32] avatar_sha256
+u64    updated_at       // Unix timestamp (seconds UTC)
+```
+
+---
+
+### OK (`0x81`)
+
+```
+u16  msg_len
 u8[] msg
 ```
 
-### ERROR (`msg_type = 0x82`)
-
-Payload:
+### ERROR (`0x82`)
 
 ```
-u16 code
-u16 msg_len
+u16  code
+u16  msg_len
 u8[] msg
 ```
 
 Error codes:
 
-- `0x0001` bad request
-- `0x0002` bad signature
-- `0x0003` not found
-- `0x0004` internal error
+| Code | Meaning |
+|------|---------|
+| `0x0001` | bad request |
+| `0x0002` | bad signature |
+| `0x0003` | not found |
+| `0x0004` | internal error |

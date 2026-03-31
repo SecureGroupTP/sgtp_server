@@ -167,6 +167,16 @@ func (s *Server) cleanupLoop(ctx context.Context) {
 	}
 }
 
+// RunCleanupLoop runs the periodic expired-profile cleanup until ctx is done.
+// Use this when the userdir server is embedded inside another server and its
+// own TCP listener is not started.
+func (s *Server) RunCleanupLoop(ctx context.Context) error {
+	s.wg.Add(1)
+	defer s.wg.Done()
+	s.cleanupLoop(ctx)
+	return nil
+}
+
 func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 	defer nc.Close()
 	remote := nc.RemoteAddr().String()
@@ -181,36 +191,52 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 		}
 	}()
 
-	const maxHeader = 4
-	_ = maxHeader
+	s.ServeConn(ctx, nc, nc)
+}
 
+// ServeConn handles the userdir protocol over an already-established r/w pair.
+// The caller must have already consumed the 32-byte zero-prefix magic (if any)
+// before invoking this method — framing starts with the first userdir frame.
+func (s *Server) ServeConn(ctx context.Context, r io.Reader, w io.Writer) {
 	maxFrame := uint32(1) + 1 + 2 + 33 + 2 + 512 + 32 + 4 + s.avatarMaxBytes + 1 + 64
 
 	for {
-		typ, payload, err := readFrame(nc, maxFrame)
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.closing:
+			return
+		default:
+		}
+
+		typ, payload, err := readFrame(r, maxFrame)
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
 				return
 			}
-			s.logger.Printf("[userdir] %s: read error: %v", remote, err)
+			s.logger.Printf("[userdir] read error: %v", err)
 			return
 		}
 
 		switch typ {
 		case msgRegister:
-			if err := s.handleRegister(nc, payload); err != nil {
-				s.logger.Printf("[userdir] %s: register error: %v", remote, err)
+			if err := s.handleRegister(w, payload); err != nil {
+				s.logger.Printf("[userdir] register error: %v", err)
 			}
 		case msgSearch:
-			if err := s.handleSearch(nc, payload); err != nil {
-				s.logger.Printf("[userdir] %s: search error: %v", remote, err)
+			if err := s.handleSearch(w, payload); err != nil {
+				s.logger.Printf("[userdir] search error: %v", err)
 			}
 		case msgGetProfile:
-			if err := s.handleGetProfile(nc, payload); err != nil {
-				s.logger.Printf("[userdir] %s: get_profile error: %v", remote, err)
+			if err := s.handleGetProfile(w, payload); err != nil {
+				s.logger.Printf("[userdir] get_profile error: %v", err)
+			}
+		case msgGetMeta:
+			if err := s.handleGetMeta(w, payload); err != nil {
+				s.logger.Printf("[userdir] get_meta error: %v", err)
 			}
 		default:
-			_ = writeError(nc, errBadRequest, "unknown message type")
+			_ = writeError(w, errBadRequest, "unknown message type")
 		}
 	}
 }
@@ -293,6 +319,32 @@ func (s *Server) handleGetProfile(w io.Writer, payload []byte) error {
 		return writeError(w, errNotFound, "not found")
 	}
 	return writeProfile(w, p)
+}
+
+// handleGetMeta handles msgGetMeta: returns username, fullname, avatar_sha256 and
+// updated_at for a given public key — without sending the full avatar bytes.
+func (s *Server) handleGetMeta(w io.Writer, payload []byte) error {
+	ver, pubkey, err := parseGetMeta(payload)
+	if err != nil {
+		_ = writeError(w, errBadRequest, err.Error())
+		return err
+	}
+	if ver != 1 {
+		return writeError(w, errBadRequest, "unsupported version")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	p, ok, err := s.store.GetByPubKey(ctx, pubkey)
+	if err != nil {
+		_ = writeError(w, errInternal, "storage error")
+		return err
+	}
+	if !ok {
+		return writeError(w, errNotFound, "not found")
+	}
+	return writeMetaResponse(w, p)
 }
 
 func parseRegister(payload []byte, avatarMax uint32) (ver byte, username, fullname string, pubkey [32]byte, avatar []byte, sigAlg byte, sig []byte, signed []byte, err error) {
@@ -417,7 +469,7 @@ func writeSearchResults(w io.Writer, res []SearchResult) error {
 }
 
 func writeProfile(w io.Writer, p *Profile) error {
-	// payload: [1B ver][32B pubkey][2B ulen][u][2B flen][f][4B alen][avatar][32B avatar_sha]
+	// payload: [1B ver][32B pubkey][2B ulen][u][2B flen][f][4B alen][avatar][32B avatar_sha][8B updated_at_unix_sec]
 	var buf []byte
 	buf = append(buf, 1)
 	buf = append(buf, p.PubKey[:]...)
@@ -436,5 +488,10 @@ func writeProfile(w io.Writer, p *Profile) error {
 	buf = append(buf, tmp4...)
 	buf = append(buf, p.Avatar...)
 	buf = append(buf, p.AvatarSHA256[:]...)
+
+	var ts [8]byte
+	binary.BigEndian.PutUint64(ts[:], uint64(p.UpdatedAt.Unix()))
+	buf = append(buf, ts[:]...)
+
 	return writeFrame(w, msgProfile, buf)
 }

@@ -24,6 +24,7 @@ import (
 	"sync"
 
 	"github.com/SecureGroupTP/sgtp_server/protocol"
+	"github.com/SecureGroupTP/sgtp_server/userdir"
 )
 
 // ─── room ─────────────────────────────────────────────────────────────────────
@@ -170,6 +171,10 @@ type Server struct {
 
 	writeQueue int
 
+	// userdirSrv is optional. When non-nil, connections whose first 32 bytes
+	// are all zero are routed to the userdir handler instead of the relay.
+	userdirSrv *userdir.Server
+
 	roomsMu sync.RWMutex
 	rooms   map[[16]byte]*room
 
@@ -184,7 +189,9 @@ type Server struct {
 
 // New creates a Server that will listen on addr (e.g. ":7777").
 // If logger is nil, log.Default() is used.
-func New(addr string, logger *log.Logger) *Server {
+// ud is optional: when non-nil, connections prefixed with 32 zero bytes are
+// transparently routed to the userdir handler on the same port.
+func New(addr string, logger *log.Logger, ud *userdir.Server) *Server {
 	if logger == nil {
 		logger = log.Default()
 	}
@@ -192,6 +199,7 @@ func New(addr string, logger *log.Logger) *Server {
 		addr:       addr,
 		logger:     logger,
 		writeQueue: 64,
+		userdirSrv: ud,
 		rooms:      make(map[[16]byte]*room),
 		conns:      make(map[*conn]struct{}),
 		closing:    make(chan struct{}),
@@ -327,10 +335,31 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 		}
 	}()
 
+	// ── Routing: read first 32 bytes (RoomUUID + ReceiverUUID) ───────────────
+	// If both are the all-zero UUID the client is speaking the userdir protocol
+	// (it sends a 32-byte zero magic prefix, then raw userdir frames).
+	first32 := make([]byte, 32)
+	if _, err := io.ReadFull(nc, first32); err != nil {
+		s.logger.Printf("[server] %s: read routing bytes: %v", remote, err)
+		return
+	}
+
+	if isAllZero(first32) {
+		if s.userdirSrv != nil {
+			s.logger.Printf("[server] %s: routing to userdir", remote)
+			s.userdirSrv.ServeConn(ctx, nc, nc)
+		} else {
+			s.logger.Printf("[server] %s: userdir not configured, closing", remote)
+		}
+		return
+	}
+
 	// ── Read the connection-intent frame ─────────────────────────────────────
 	// Format: [64-byte header][payload][64-byte signature].
+	// We already have the first 32 bytes; read the remaining 32 to complete the header.
 	hdrBuf := make([]byte, protocol.HeaderSize)
-	if _, err := io.ReadFull(nc, hdrBuf); err != nil {
+	copy(hdrBuf[0:32], first32)
+	if _, err := io.ReadFull(nc, hdrBuf[32:]); err != nil {
 		s.logger.Printf("[server] %s: read intent header: %v", remote, err)
 		return
 	}
@@ -414,6 +443,16 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 			r.unicast(fhdr.ReceiverUUID, raw)
 		}
 	}
+}
+
+// isAllZero reports whether every byte in b is 0x00.
+func isAllZero(b []byte) bool {
+	for _, v := range b {
+		if v != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // readRawFrame reads exactly one complete SGTP frame from r.
