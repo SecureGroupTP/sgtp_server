@@ -12,6 +12,7 @@ services:
       PROFILE_TTL: "24h"
       AVATAR_MAX_BYTES: "33554432"
       SEARCH_MAX_RESULTS: "20"
+      SUBSCRIBE_MAX: "500"
       CLEANUP_INTERVAL: "5m"
     ports:
       - "0.0.0.0:${CHAT_PORT}:${CHAT_PORT}"
@@ -31,6 +32,7 @@ services:
       PROFILE_TTL: "24h"
       AVATAR_MAX_BYTES: "33554432"
       SEARCH_MAX_RESULTS: "20"
+      SUBSCRIBE_MAX: "500"
       CLEANUP_INTERVAL: "5m"
     ports:
       - "0.0.0.0:${VOICE_PORT}:${VOICE_PORT}"

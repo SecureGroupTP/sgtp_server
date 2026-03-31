@@ -54,6 +54,11 @@ func main() {
 			logger.Fatalf("[server] invalid CLEANUP_INTERVAL: %v", err)
 		}
 
+		subscribeMax, err := int64FromEnv("SUBSCRIBE_MAX", 500)
+		if err != nil {
+			logger.Fatalf("[server] invalid SUBSCRIBE_MAX: %v", err)
+		}
+
 		store, err := userdir.OpenStore(ctx, dsn, ttl)
 		if err != nil {
 			logger.Fatalf("[server] userdir open store: %v", err)
@@ -65,6 +70,7 @@ func main() {
 			Store:          store,
 			AvatarMaxBytes: avatarMax,
 			SearchMax:      searchMax,
+			SubscribeMax:   int(subscribeMax),
 			CleanupEvery:   cleanupEvery,
 		})
 		if err != nil {
@@ -138,4 +144,16 @@ func uint16FromEnv(key string, def uint16) (uint16, error) {
 		return 0, fmt.Errorf("%s: %w", key, err)
 	}
 	return uint16(n), nil
+}
+
+func int64FromEnv(key string, def int64) (int64, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", key, err)
+	}
+	return n, nil
 }

@@ -48,6 +48,7 @@ User directory (enabled when `PG_DSN` is set; both `sgtp_chat` and `sgtp_voice` 
 - `PROFILE_TTL` — how long profiles are kept (default: `24h`)
 - `AVATAR_MAX_BYTES` — max avatar size (default: `33554432` = 32 MiB)
 - `SEARCH_MAX_RESULTS` — hard cap for search responses (default: `20`)
+- `SUBSCRIBE_MAX` — max pubkeys one connection may subscribe to at once (default: `500`)
 - `CLEANUP_INTERVAL` — how often expired rows are deleted (default: `5m`)
 
 ## Userdir wire protocol (binary, big-endian)
@@ -70,11 +71,14 @@ If `frame_len` exceeds the configured maximum (derived from `AVATAR_MAX_BYTES`) 
 | `0x02` | → server | SEARCH |
 | `0x03` | → server | GET_PROFILE |
 | `0x04` | → server | GET_META |
+| `0x05` | → server | SUBSCRIBE |
+| `0x06` | → server | UNSUBSCRIBE |
 | `0x81` | ← server | OK |
 | `0x82` | ← server | ERROR |
 | `0x83` | ← server | SEARCH_RESULTS |
 | `0x84` | ← server | PROFILE |
 | `0x85` | ← server | META |
+| `0x86` | ← server | NOTIFY (unsolicited push) |
 
 ---
 
@@ -209,3 +213,56 @@ Error codes:
 | `0x0002` | bad signature |
 | `0x0003` | not found |
 | `0x0004` | internal error |
+
+---
+
+### SUBSCRIBE (`0x05`)
+
+Subscribes to profile-change notifications for a list of public keys. The connection stays open; the server will push a `NOTIFY` frame any time one of the subscribed profiles is updated via REGISTER.
+
+Multiple SUBSCRIBE calls on the same connection are additive — they append to the existing subscription set. The server-side limit per connection is `SUBSCRIBE_MAX` (default: 500). Exceeding it returns an `ERROR`.
+
+Request payload:
+
+```
+u8     version          // 1
+u16    count            // number of pubkeys to subscribe to
+u8[32] pubkey[]         // list of pubkeys (count entries)
+```
+
+Response: `OK (0x81)` or `ERROR (0x82)`.
+
+---
+
+### UNSUBSCRIBE (`0x06`)
+
+Removes pubkeys from the subscription set. `count == 0` unsubscribes from all.
+
+Request payload (same format as SUBSCRIBE):
+
+```
+u8     version          // 1
+u16    count            // 0 = unsubscribe all
+u8[32] pubkey[]         // list of pubkeys (count entries)
+```
+
+Response: `OK (0x81)`.
+
+---
+
+### NOTIFY (`0x86`) — server push
+
+Sent by the server without a request whenever a subscribed profile is updated. The payload is identical to `META (0x85)`. The client should never send this type.
+
+```
+u8     version          // 1
+u8[32] pubkey
+u16    username_len
+u8[]   username
+u16    fullname_len
+u8[]   fullname
+u8[32] avatar_sha256
+u64    updated_at       // Unix timestamp (seconds UTC)
+```
+
+The `avatar_sha256` field lets the client decide whether to fetch the full profile (avatar changed) or just update the displayed name/username (avatar unchanged).
