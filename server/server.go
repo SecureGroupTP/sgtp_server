@@ -1,0 +1,446 @@
+// Package server implements a simple SGTP relay server.
+//
+// The relay server is a transparent byte forwarder. It reads complete SGTP
+// frames from connected clients and routes them:
+//
+//   - receiver_uuid == BROADCAST_UUID → all clients in the room except the sender
+//   - receiver_uuid != BROADCAST_UUID → unicast to that specific client
+//
+// When a new client connects and sends the intent frame, the server broadcasts
+// that intent frame to existing room members so they learn a new peer has
+// arrived and can initiate the PING handshake.
+//
+// The server does NOT decrypt, validate signatures, or maintain session state.
+package server
+
+import (
+	"context"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"sync"
+
+	"github.com/SecureGroupTP/sgtp_server/protocol"
+)
+
+// ─── room ─────────────────────────────────────────────────────────────────────
+
+type room struct {
+	mu      sync.RWMutex
+	clients map[[16]byte]*conn
+}
+
+func newRoom() *room {
+	return &room{clients: make(map[[16]byte]*conn)}
+}
+
+func (r *room) add(c *conn) (replaced *conn) {
+	r.mu.Lock()
+	replaced = r.clients[c.uuid]
+	r.clients[c.uuid] = c
+	r.mu.Unlock()
+	return replaced
+}
+
+func (r *room) remove(uuid [16]byte) {
+	r.mu.Lock()
+	delete(r.clients, uuid)
+	r.mu.Unlock()
+}
+
+func (r *room) isEmpty() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.clients) == 0
+}
+
+func (r *room) count() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.clients)
+}
+
+// broadcast sends raw to all clients except the one with senderID.
+func (r *room) broadcast(senderID [16]byte, raw []byte) {
+	r.mu.RLock()
+	targets := make([]*conn, 0, len(r.clients))
+	for id, c := range r.clients {
+		if id != senderID {
+			targets = append(targets, c)
+		}
+	}
+	r.mu.RUnlock()
+	for _, c := range targets {
+		c.send(raw)
+	}
+}
+
+// unicast sends raw to the single client with receiverID.
+func (r *room) unicast(receiverID [16]byte, raw []byte) {
+	r.mu.RLock()
+	c := r.clients[receiverID]
+	r.mu.RUnlock()
+	if c != nil {
+		c.send(raw)
+	}
+}
+
+// ─── conn ─────────────────────────────────────────────────────────────────────
+
+type conn struct {
+	uuid    [16]byte
+	roomID  [16]byte
+	netConn net.Conn
+
+	sendCh chan []byte
+
+	closeOnce sync.Once
+	closed    chan struct{}
+}
+
+func newConn(uuid, roomID [16]byte, nc net.Conn, queue int) *conn {
+	if queue <= 0 {
+		queue = 64
+	}
+	c := &conn{
+		uuid:    uuid,
+		roomID:  roomID,
+		netConn: nc,
+		sendCh:  make(chan []byte, queue),
+		closed:  make(chan struct{}),
+	}
+	go c.writeLoop()
+	return c
+}
+
+func (c *conn) send(raw []byte) {
+	b := append([]byte(nil), raw...)
+	select {
+	case c.sendCh <- b:
+	case <-c.closed:
+	default:
+		// Slow consumer: avoid unbounded buffering or blocking broadcasters.
+		c.Close()
+	}
+}
+
+func (c *conn) Close() {
+	c.closeOnce.Do(func() {
+		close(c.closed)
+		_ = c.netConn.Close()
+	})
+}
+
+func (c *conn) writeLoop() {
+	for {
+		select {
+		case b := <-c.sendCh:
+			if err := writeAll(c.netConn, b); err != nil {
+				c.Close()
+				return
+			}
+		case <-c.closed:
+			return
+		}
+	}
+}
+
+func writeAll(w io.Writer, b []byte) error {
+	for len(b) > 0 {
+		n, err := w.Write(b)
+		if err != nil {
+			return err
+		}
+		b = b[n:]
+	}
+	return nil
+}
+
+// ─── Server ───────────────────────────────────────────────────────────────────
+
+// Server is the SGTP relay server.
+//
+// Use ListenAndServe(ctx) to run it, and Shutdown(ctx) to stop it gracefully.
+type Server struct {
+	addr   string
+	logger *log.Logger
+
+	writeQueue int
+
+	roomsMu sync.RWMutex
+	rooms   map[[16]byte]*room
+
+	mu        sync.Mutex
+	listener  net.Listener
+	conns     map[*conn]struct{}
+	closeOnce sync.Once
+	closing   chan struct{}
+
+	wg sync.WaitGroup
+}
+
+// New creates a Server that will listen on addr (e.g. ":7777").
+// If logger is nil, log.Default() is used.
+func New(addr string, logger *log.Logger) *Server {
+	if logger == nil {
+		logger = log.Default()
+	}
+	return &Server{
+		addr:       addr,
+		logger:     logger,
+		writeQueue: 64,
+		rooms:      make(map[[16]byte]*room),
+		conns:      make(map[*conn]struct{}),
+		closing:    make(chan struct{}),
+	}
+}
+
+// ListenAndServe starts the TCP listener and blocks until it returns an error
+// or ctx is cancelled.
+func (s *Server) ListenAndServe(ctx context.Context) error {
+	ln, err := net.Listen("tcp", s.addr)
+	if err != nil {
+		return fmt.Errorf("sgtp: listen %s: %w", s.addr, err)
+	}
+	return s.Serve(ctx, ln)
+}
+
+// Serve runs the server on the provided listener.
+func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
+	s.mu.Lock()
+	if s.listener != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("sgtp: Serve called more than once")
+	}
+	s.listener = ln
+	s.mu.Unlock()
+
+	s.logger.Printf("[server] listening on %s", ln.Addr().String())
+
+	stopCtx := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			s.initiateClose()
+		case <-stopCtx:
+		}
+	}()
+	defer close(stopCtx)
+
+	for {
+		nc, err := ln.Accept()
+		if err != nil {
+			if errors.Is(err, net.ErrClosed) || ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("sgtp: accept: %w", err)
+		}
+
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.handleConn(ctx, nc)
+		}()
+	}
+}
+
+func (s *Server) initiateClose() {
+	s.closeOnce.Do(func() {
+		close(s.closing)
+
+		s.mu.Lock()
+		ln := s.listener
+		s.mu.Unlock()
+		if ln != nil {
+			_ = ln.Close()
+		}
+
+		s.mu.Lock()
+		conns := make([]*conn, 0, len(s.conns))
+		for c := range s.conns {
+			conns = append(conns, c)
+		}
+		s.mu.Unlock()
+		for _, c := range conns {
+			c.Close()
+		}
+	})
+}
+
+// Shutdown stops accepting new connections, closes all active connections, and
+// waits for connection goroutines to exit until ctx is done.
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.initiateClose()
+
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *Server) trackConn(c *conn) {
+	s.mu.Lock()
+	s.conns[c] = struct{}{}
+	s.mu.Unlock()
+}
+
+func (s *Server) untrackConn(c *conn) {
+	s.mu.Lock()
+	delete(s.conns, c)
+	s.mu.Unlock()
+}
+
+func (s *Server) getOrCreateRoom(roomID [16]byte) *room {
+	s.roomsMu.Lock()
+	r := s.rooms[roomID]
+	if r == nil {
+		r = newRoom()
+		s.rooms[roomID] = r
+	}
+	s.roomsMu.Unlock()
+	return r
+}
+
+// handleConn manages one TCP connection for its lifetime.
+func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
+	defer nc.Close()
+	remote := nc.RemoteAddr().String()
+	s.logger.Printf("[server] new connection from %s", remote)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = nc.Close()
+		case <-s.closing:
+			_ = nc.Close()
+		}
+	}()
+
+	// ── Read the connection-intent frame ─────────────────────────────────────
+	// Format: [64-byte header][payload][64-byte signature].
+	hdrBuf := make([]byte, protocol.HeaderSize)
+	if _, err := io.ReadFull(nc, hdrBuf); err != nil {
+		s.logger.Printf("[server] %s: read intent header: %v", remote, err)
+		return
+	}
+
+	hdr, err := protocol.UnmarshalHeader(hdrBuf)
+	if err != nil {
+		s.logger.Printf("[server] %s: parse intent header: %v", remote, err)
+		return
+	}
+
+	if hdr.PayloadLen > protocol.MaxPayloadLength {
+		s.logger.Printf("[server] %s: intent payload_length %d too large — closing", remote, hdr.PayloadLen)
+		return
+	}
+
+	tail := make([]byte, int(hdr.PayloadLen)+protocol.SignatureSize)
+	if _, err := io.ReadFull(nc, tail); err != nil {
+		s.logger.Printf("[server] %s: read intent tail: %v", remote, err)
+		return
+	}
+
+	roomID := hdr.RoomUUID
+	senderID := hdr.SenderUUID
+	intentRaw := append(append([]byte(nil), hdrBuf...), tail...)
+
+	s.logger.Printf("[server] intent from uuid=%x room=%x", senderID[:4], roomID[:4])
+
+	// ── Register client in room ──────────────────────────────────────────────
+	r := s.getOrCreateRoom(roomID)
+
+	// Broadcast the intent frame to existing members BEFORE adding the new client.
+	r.broadcast(senderID, intentRaw)
+	s.logger.Printf("[server] intent broadcast to %d existing members", r.count())
+
+	cn := newConn(senderID, roomID, nc, s.writeQueue)
+	s.trackConn(cn)
+	defer func() {
+		cn.Close()
+		s.untrackConn(cn)
+	}()
+
+	if replaced := r.add(cn); replaced != nil && replaced != cn {
+		replaced.Close()
+	}
+	s.logger.Printf("[server] uuid=%x joined room=%x (members now: %d)", senderID[:4], roomID[:4], r.count())
+
+	defer func() {
+		r.remove(senderID)
+		if r.isEmpty() {
+			s.roomsMu.Lock()
+			delete(s.rooms, roomID)
+			s.roomsMu.Unlock()
+		}
+		s.logger.Printf("[server] uuid=%x left room=%x (members now: %d)", senderID[:4], roomID[:4], r.count())
+	}()
+
+	// ── Forward loop ─────────────────────────────────────────────────────────
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.closing:
+			return
+		default:
+		}
+
+		raw, fhdr, err := readRawFrame(nc)
+		if err != nil {
+			if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
+				s.logger.Printf("[server] uuid=%x read error: %v", senderID[:4], err)
+			}
+			return
+		}
+
+		s.logger.Printf("[server] relay type=0x%02x from=%x to=%x len=%d",
+			uint16(fhdr.PacketType), senderID[:4], fhdr.ReceiverUUID[:4], len(raw))
+
+		if fhdr.ReceiverUUID == protocol.BroadcastUUID {
+			r.broadcast(senderID, raw)
+		} else {
+			r.unicast(fhdr.ReceiverUUID, raw)
+		}
+	}
+}
+
+// readRawFrame reads exactly one complete SGTP frame from r.
+// It only inspects the header to find boundaries — it does not parse content.
+func readRawFrame(r io.Reader) ([]byte, *protocol.Header, error) {
+	hdrBuf := make([]byte, protocol.HeaderSize)
+	if _, err := io.ReadFull(r, hdrBuf); err != nil {
+		return nil, nil, err
+	}
+
+	payloadLen := binary.BigEndian.Uint32(hdrBuf[52:56])
+	if payloadLen > protocol.MaxPayloadLength {
+		return nil, nil, fmt.Errorf("sgtp: payload_length %d exceeds maximum", payloadLen)
+	}
+
+	rest := make([]byte, int(payloadLen)+protocol.SignatureSize)
+	if _, err := io.ReadFull(r, rest); err != nil {
+		return nil, nil, err
+	}
+
+	hdr, err := protocol.UnmarshalHeader(hdrBuf)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	raw := make([]byte, 0, len(hdrBuf)+len(rest))
+	raw = append(raw, hdrBuf...)
+	raw = append(raw, rest...)
+	return raw, hdr, nil
+}

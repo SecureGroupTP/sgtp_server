@@ -1,0 +1,23 @@
+services:
+  sgtp_chat:
+    container_name: sgtp_chat
+    build: .
+    environment:
+      SERVER_PORT: "70"
+      SHUTDOWN_TIMEOUT: "10s"
+    ports:
+      - "70:70"
+    restart: unless-stopped
+    init: true
+
+  sgtp_voice:
+    container_name: sgtp_voice
+    build: .
+    environment:
+      SERVER_PORT: "77"
+      SHUTDOWN_TIMEOUT: "10s"
+    ports:
+      - "77:77"
+    restart: unless-stopped
+    init: true
+
