@@ -776,4 +776,3 @@ func unmarshalKicked(h *Header, payload, sig []byte) (*Kicked, error) {
 	copy(p.Signature[:], sig)
 	return p, nil
 }
-

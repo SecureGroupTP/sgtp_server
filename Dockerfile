@@ -1,20 +1,27 @@
-FROM golang:1.23-alpine AS build
+FROM golang:1.25-alpine AS build
 
 WORKDIR /src
 RUN apk add --no-cache ca-certificates
 
 COPY go.mod ./
+COPY go.sum ./
+RUN go mod download
+
 COPY cmd ./cmd
 COPY server ./server
 COPY protocol ./protocol
+COPY userdir ./userdir
+COPY internal ./internal
 
 ENV CGO_ENABLED=0
 RUN go build -trimpath -ldflags="-s -w" -o /out/sgtp-server ./cmd/sgtp-server
+RUN go build -trimpath -ldflags="-s -w" -o /out/sgtp-userdir ./cmd/sgtp-userdir
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates
 
 COPY --from=build /out/sgtp-server /usr/local/bin/sgtp-server
+COPY --from=build /out/sgtp-userdir /usr/local/bin/sgtp-userdir
 
 USER 65532:65532
-ENTRYPOINT ["/usr/local/bin/sgtp-server"]
+CMD ["/usr/local/bin/sgtp-server"]
