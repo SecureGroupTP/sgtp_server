@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -16,27 +17,63 @@ import (
 
 var usernameRe = regexp.MustCompile(`^@[A-Za-z0-9_]{1,32}$`)
 
+// shortKey returns the first 4 bytes of a pubkey as a hex string for logs.
+func shortKey(k [32]byte) string { return hex.EncodeToString(k[:4]) }
+
+// msgTypeName returns a human-readable name for a message type byte.
+func msgTypeName(t byte) string {
+	switch t {
+	case msgRegister:
+		return "REGISTER"
+	case msgSearch:
+		return "SEARCH"
+	case msgGetProfile:
+		return "GET_PROFILE"
+	case msgGetMeta:
+		return "GET_META"
+	case msgSubscribe:
+		return "SUBSCRIBE"
+	case msgUnsubscribe:
+		return "UNSUBSCRIBE"
+	case msgOK:
+		return "OK"
+	case msgError:
+		return "ERROR"
+	case msgResults:
+		return "SEARCH_RESULTS"
+	case msgProfile:
+		return "PROFILE"
+	case msgMeta:
+		return "META"
+	case msgNotify:
+		return "NOTIFY"
+	default:
+		return fmt.Sprintf("UNKNOWN(0x%02x)", t)
+	}
+}
+
 // ─── connSub ─────────────────────────────────────────────────────────────────
 
 // connSub tracks the subscription state for a single open connection.
-// It is created inside ServeConn and registered/deregistered in the subs map.
 type connSub struct {
+	id     string     // short random-ish id for logs (remote addr)
 	sendCh chan []byte // outbound frames (responses + async notifies)
 
 	mu   sync.Mutex
 	keys map[[32]byte]struct{} // pubkeys this connection is subscribed to
 }
 
-func newConnSub(sendBuf int) *connSub {
+func newConnSub(id string, sendBuf int) *connSub {
 	return &connSub{
+		id:     id,
 		sendCh: make(chan []byte, sendBuf),
 		keys:   make(map[[32]byte]struct{}),
 	}
 }
 
-// subscribe adds pubkeys to the subscription set and returns how many were
-// actually new (i.e. not already subscribed).
-func (c *connSub) subscribe(keys [][32]byte, max int) (added int, limitReached bool) {
+// subscribe adds pubkeys to the subscription set.
+// Returns the slice of keys that were actually new, and whether the limit was hit.
+func (c *connSub) subscribe(keys [][32]byte, max int) (added [][32]byte, limitReached bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, k := range keys {
@@ -48,13 +85,12 @@ func (c *connSub) subscribe(keys [][32]byte, max int) (added int, limitReached b
 			break
 		}
 		c.keys[k] = struct{}{}
-		added++
+		added = append(added, k)
 	}
 	return added, limitReached
 }
 
 // unsubscribe removes pubkeys from the subscription set.
-// Returns the slice of keys that were actually removed.
 func (c *connSub) unsubscribe(keys [][32]byte) [][32]byte {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -80,12 +116,20 @@ func (c *connSub) unsubscribeAll() [][32]byte {
 	return keys
 }
 
-// deliver tries to enqueue a pre-built frame for delivery to the client.
-// Drops silently if the send buffer is full (slow consumer).
-func (c *connSub) deliver(frame []byte) {
+// subCount returns the current subscription count (for logging).
+func (c *connSub) subCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.keys)
+}
+
+// deliver tries to enqueue a pre-built frame. Drops silently if buffer is full.
+func (c *connSub) deliver(frame []byte) bool {
 	select {
 	case c.sendCh <- frame:
+		return true
 	default:
+		return false
 	}
 }
 
@@ -98,10 +142,9 @@ type Server struct {
 
 	avatarMaxBytes uint32
 	searchMax      uint16
-	subscribeMax   int // max pubkeys per connection (0 = unlimited)
+	subscribeMax   int
 	cleanupEvery   time.Duration
 
-	// subs maps pubkey → set of connSubs subscribed to it.
 	subsMu sync.RWMutex
 	subs   map[[32]byte]map[*connSub]struct{}
 
@@ -179,7 +222,8 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	s.listener = ln
 	s.mu.Unlock()
 
-	s.logger.Printf("[userdir] listening on %s", ln.Addr().String())
+	s.logger.Printf("[userdir] listening on %s (avatarMax=%d searchMax=%d subscribeMax=%d cleanupEvery=%s)",
+		ln.Addr().String(), s.avatarMaxBytes, s.searchMax, s.subscribeMax, s.cleanupEvery)
 
 	stopCtx := make(chan struct{})
 	go func() {
@@ -215,6 +259,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 
 func (s *Server) initiateClose() {
 	s.closeOnce.Do(func() {
+		s.logger.Printf("[userdir] initiating shutdown")
 		close(s.closing)
 		s.mu.Lock()
 		ln := s.listener
@@ -234,32 +279,41 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}()
 	select {
 	case <-done:
+		s.logger.Printf("[userdir] shutdown complete")
 		return nil
 	case <-ctx.Done():
+		s.logger.Printf("[userdir] shutdown timed out")
 		return ctx.Err()
 	}
 }
 
 func (s *Server) cleanupLoop(ctx context.Context) {
+	s.logger.Printf("[userdir] cleanup loop started (interval=%s)", s.cleanupEvery)
 	t := time.NewTicker(s.cleanupEvery)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
+			s.logger.Printf("[userdir] cleanup loop stopped (ctx done)")
 			return
 		case <-s.closing:
+			s.logger.Printf("[userdir] cleanup loop stopped (closing)")
 			return
 		case <-t.C:
 			cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_, _ = s.store.CleanupExpired(cctx)
+			n, err := s.store.CleanupExpired(cctx)
 			cancel()
+			if err != nil {
+				s.logger.Printf("[userdir] cleanup error: %v", err)
+			} else if n > 0 {
+				s.logger.Printf("[userdir] cleanup: deleted %d expired profile(s)", n)
+			}
 		}
 	}
 }
 
 // RunCleanupLoop runs the periodic expired-profile cleanup until ctx is done.
-// Use this when the userdir server is embedded inside another server and its
-// own TCP listener is not started.
+// Use this when the userdir server is embedded and its TCP listener is not started.
 func (s *Server) RunCleanupLoop(ctx context.Context) error {
 	s.wg.Add(1)
 	defer s.wg.Done()
@@ -297,8 +351,6 @@ func (s *Server) deregisterSub(sub *connSub, keys [][32]byte) {
 	s.subsMu.Unlock()
 }
 
-// notifySubscribers is called after a successful profile upsert.
-// It builds a NOTIFY frame once and fans it out to every subscriber.
 func (s *Server) notifySubscribers(pubkey [32]byte, p *Profile) {
 	s.subsMu.RLock()
 	targets := make([]*connSub, 0, len(s.subs[pubkey]))
@@ -308,19 +360,26 @@ func (s *Server) notifySubscribers(pubkey [32]byte, p *Profile) {
 	s.subsMu.RUnlock()
 
 	if len(targets) == 0 {
+		s.logger.Printf("[userdir] notify pubkey=%s: no subscribers", shortKey(pubkey))
 		return
 	}
 
 	frame, err := writeNotify(p)
 	if err != nil {
-		s.logger.Printf("[userdir] notify: build frame: %v", err)
+		s.logger.Printf("[userdir] notify pubkey=%s: build frame error: %v", shortKey(pubkey), err)
 		return
 	}
 
+	delivered, dropped := 0, 0
 	for _, sub := range targets {
-		sub.deliver(frame)
+		if sub.deliver(frame) {
+			delivered++
+		} else {
+			dropped++
+		}
 	}
-	s.logger.Printf("[userdir] notify: pushed to %d subscriber(s) for pubkey %x", len(targets), pubkey[:4])
+	s.logger.Printf("[userdir] notify pubkey=%s: delivered=%d dropped=%d (slow consumers)",
+		shortKey(pubkey), delivered, dropped)
 }
 
 // ─── Connection handling ─────────────────────────────────────────────────────
@@ -328,47 +387,58 @@ func (s *Server) notifySubscribers(pubkey [32]byte, p *Profile) {
 func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 	defer nc.Close()
 	remote := nc.RemoteAddr().String()
-	s.logger.Printf("[userdir] new connection from %s", remote)
+	s.logger.Printf("[userdir] [%s] connected", remote)
 
 	go func() {
 		select {
 		case <-ctx.Done():
+			s.logger.Printf("[userdir] [%s] closing: ctx done", remote)
 			_ = nc.Close()
 		case <-s.closing:
+			s.logger.Printf("[userdir] [%s] closing: server shutting down", remote)
 			_ = nc.Close()
 		}
 	}()
 
 	s.ServeConn(ctx, nc, nc)
+	s.logger.Printf("[userdir] [%s] disconnected", remote)
 }
 
 // ServeConn handles the userdir protocol over an already-established r/w pair.
-// The caller must have already consumed the 32-byte zero-prefix magic (if any)
-// before invoking this method — framing starts with the first userdir frame.
-//
-// Read and write are separated: a background goroutine drains sendCh → w so
-// that server-pushed NOTIFY frames can arrive independently of the read loop.
+// The caller must have consumed the 32-byte zero-prefix magic before calling.
 func (s *Server) ServeConn(ctx context.Context, r io.Reader, w io.Writer) {
-	sub := newConnSub(128)
+	// Use the remote address when available, fall back to a generic label.
+	connID := "inline"
+	if nc, ok := r.(interface{ RemoteAddr() net.Addr }); ok {
+		connID = nc.RemoteAddr().String()
+	}
 
-	// Write goroutine: drains sub.sendCh → w.
+	s.logger.Printf("[userdir] [%s] ServeConn started (avatarMax=%d subscribeMax=%d)",
+		connID, s.avatarMaxBytes, s.subscribeMax)
+
+	sub := newConnSub(connID, 128)
+
 	writeCtx, writeCancel := context.WithCancel(ctx)
 	defer writeCancel()
 
 	writeDone := make(chan struct{})
 	go func() {
 		defer close(writeDone)
+		s.logger.Printf("[userdir] [%s] write goroutine started", connID)
 		for {
 			select {
 			case frame, ok := <-sub.sendCh:
 				if !ok {
+					s.logger.Printf("[userdir] [%s] write goroutine: sendCh closed, exiting", connID)
 					return
 				}
 				if err := writeAll(w, frame); err != nil {
+					s.logger.Printf("[userdir] [%s] write goroutine: write error: %v", connID, err)
 					return
 				}
 			case <-writeCtx.Done():
-				// Drain any remaining frames before exit.
+				// Drain remaining frames before exit.
+				s.logger.Printf("[userdir] [%s] write goroutine: ctx done, draining sendCh", connID)
 				for {
 					select {
 					case frame, ok := <-sub.sendCh:
@@ -385,22 +455,27 @@ func (s *Server) ServeConn(ctx context.Context, r io.Reader, w io.Writer) {
 	}()
 
 	defer func() {
-		// Unregister all subscriptions for this connection.
 		keys := sub.unsubscribeAll()
-		s.deregisterSub(sub, keys)
-		// Signal write goroutine to stop, then wait.
+		if len(keys) > 0 {
+			s.logger.Printf("[userdir] [%s] cleanup: deregistering %d subscription(s)", connID, len(keys))
+			s.deregisterSub(sub, keys)
+		}
 		writeCancel()
 		close(sub.sendCh)
 		<-writeDone
+		s.logger.Printf("[userdir] [%s] ServeConn done", connID)
 	}()
 
 	maxFrame := uint32(1) + 1 + 2 + 33 + 2 + 512 + 32 + 4 + s.avatarMaxBytes + 1 + 64
+	s.logger.Printf("[userdir] [%s] read loop started (maxFrame=%d)", connID, maxFrame)
 
 	for {
 		select {
 		case <-ctx.Done():
+			s.logger.Printf("[userdir] [%s] read loop: ctx done", connID)
 			return
 		case <-s.closing:
+			s.logger.Printf("[userdir] [%s] read loop: server closing", connID)
 			return
 		default:
 		}
@@ -408,39 +483,44 @@ func (s *Server) ServeConn(ctx context.Context, r io.Reader, w io.Writer) {
 		typ, payload, err := readFrame(r, maxFrame)
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
-				return
+				s.logger.Printf("[userdir] [%s] read loop: connection closed (%v)", connID, err)
+			} else {
+				s.logger.Printf("[userdir] [%s] read loop: read error: %v", connID, err)
 			}
-			s.logger.Printf("[userdir] read error: %v", err)
 			return
 		}
+
+		s.logger.Printf("[userdir] [%s] → recv type=0x%02x (%s) payloadLen=%d",
+			connID, typ, msgTypeName(typ), len(payload))
 
 		switch typ {
 		case msgRegister:
 			if err := s.handleRegister(sub, payload); err != nil {
-				s.logger.Printf("[userdir] register error: %v", err)
+				s.logger.Printf("[userdir] [%s] REGISTER error: %v", connID, err)
 			}
 		case msgSearch:
 			if err := s.handleSearch(sub, payload); err != nil {
-				s.logger.Printf("[userdir] search error: %v", err)
+				s.logger.Printf("[userdir] [%s] SEARCH error: %v", connID, err)
 			}
 		case msgGetProfile:
 			if err := s.handleGetProfile(sub, payload); err != nil {
-				s.logger.Printf("[userdir] get_profile error: %v", err)
+				s.logger.Printf("[userdir] [%s] GET_PROFILE error: %v", connID, err)
 			}
 		case msgGetMeta:
 			if err := s.handleGetMeta(sub, payload); err != nil {
-				s.logger.Printf("[userdir] get_meta error: %v", err)
+				s.logger.Printf("[userdir] [%s] GET_META error: %v", connID, err)
 			}
 		case msgSubscribe:
 			if err := s.handleSubscribe(sub, payload); err != nil {
-				s.logger.Printf("[userdir] subscribe error: %v", err)
+				s.logger.Printf("[userdir] [%s] SUBSCRIBE error: %v", connID, err)
 			}
 		case msgUnsubscribe:
 			if err := s.handleUnsubscribe(sub, payload); err != nil {
-				s.logger.Printf("[userdir] unsubscribe error: %v", err)
+				s.logger.Printf("[userdir] [%s] UNSUBSCRIBE error: %v", connID, err)
 			}
 		default:
-			s.sendError(sub, errBadRequest, "unknown message type")
+			s.logger.Printf("[userdir] [%s] unknown message type 0x%02x — sending error", connID, typ)
+			s.sendError(sub, errBadRequest, fmt.Sprintf("unknown message type 0x%02x", typ))
 		}
 	}
 }
@@ -457,16 +537,19 @@ func writeAll(w io.Writer, b []byte) error {
 	return nil
 }
 
-// sendFrame enqueues a pre-serialised frame for delivery. Uses the connSub
-// channel so the response goes through the same serialised write goroutine as
-// async notifies, avoiding concurrent writes to w.
 func (s *Server) sendFrame(sub *connSub, typ byte, payload []byte) {
 	n := uint32(1 + len(payload))
 	frame := make([]byte, 4+1+len(payload))
 	binary.BigEndian.PutUint32(frame[0:4], n)
 	frame[4] = typ
 	copy(frame[5:], payload)
-	sub.deliver(frame)
+	if !sub.deliver(frame) {
+		s.logger.Printf("[userdir] [%s] ← DROPPED type=0x%02x (%s): sendCh full",
+			sub.id, typ, msgTypeName(typ))
+		return
+	}
+	s.logger.Printf("[userdir] [%s] ← send type=0x%02x (%s) payloadLen=%d",
+		sub.id, typ, msgTypeName(typ), len(payload))
 }
 
 func (s *Server) sendOK(sub *connSub, msg string) {
@@ -478,6 +561,7 @@ func (s *Server) sendOK(sub *connSub, msg string) {
 }
 
 func (s *Server) sendError(sub *connSub, code uint16, msg string) {
+	s.logger.Printf("[userdir] [%s] ← ERROR code=0x%04x msg=%q", sub.id, code, msg)
 	b := []byte(msg)
 	p := make([]byte, 2+2+len(b))
 	binary.BigEndian.PutUint16(p[0:2], code)
@@ -491,36 +575,49 @@ func (s *Server) sendError(sub *connSub, code uint16, msg string) {
 func (s *Server) handleRegister(sub *connSub, payload []byte) error {
 	ver, username, fullname, pubkey, avatar, sigAlg, sig, signed, err := parseRegister(payload, s.avatarMaxBytes)
 	if err != nil {
+		s.logger.Printf("[userdir] [%s] REGISTER: parse failed: %v", sub.id, err)
 		s.sendError(sub, errBadRequest, err.Error())
 		return err
 	}
+	s.logger.Printf("[userdir] [%s] REGISTER: ver=%d username=%q fullname=%q pubkey=%s avatarLen=%d sigAlg=%d",
+		sub.id, ver, username, fullname, shortKey(pubkey), len(avatar), sigAlg)
+
 	if ver != 1 {
+		s.logger.Printf("[userdir] [%s] REGISTER: unsupported version %d", sub.id, ver)
 		s.sendError(sub, errBadRequest, "unsupported version")
 		return nil
 	}
 	if sigAlg != 1 {
+		s.logger.Printf("[userdir] [%s] REGISTER: unsupported sig_alg %d", sub.id, sigAlg)
 		s.sendError(sub, errBadRequest, "unsupported signature algorithm")
 		return nil
 	}
 	if !usernameRe.MatchString(username) {
+		s.logger.Printf("[userdir] [%s] REGISTER: invalid username format %q", sub.id, username)
 		s.sendError(sub, errBadRequest, "invalid username format")
 		return nil
 	}
 	if !ed25519.Verify(ed25519.PublicKey(pubkey[:]), signed, sig) {
+		s.logger.Printf("[userdir] [%s] REGISTER: signature verification FAILED for pubkey=%s", sub.id, shortKey(pubkey))
 		s.sendError(sub, errBadSig, "invalid signature")
 		return nil
 	}
+	s.logger.Printf("[userdir] [%s] REGISTER: signature OK, upserting pubkey=%s", sub.id, shortKey(pubkey))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := s.store.UpsertProfile(ctx, pubkey, username, fullname, avatar); err != nil {
+		s.logger.Printf("[userdir] [%s] REGISTER: upsert failed: %v", sub.id, err)
 		s.sendError(sub, errInternal, "storage error")
 		return err
 	}
+	s.logger.Printf("[userdir] [%s] REGISTER: upsert OK pubkey=%s", sub.id, shortKey(pubkey))
 
-	// Fetch the stored profile (with updated_at / avatar_sha256) for notifications.
 	p, ok, err := s.store.GetByPubKey(ctx, pubkey)
-	if err == nil && ok {
+	if err != nil {
+		s.logger.Printf("[userdir] [%s] REGISTER: post-upsert fetch error (notify skipped): %v", sub.id, err)
+	} else if ok {
+		s.logger.Printf("[userdir] [%s] REGISTER: triggering notify for pubkey=%s", sub.id, shortKey(pubkey))
 		go s.notifySubscribers(pubkey, p)
 	}
 
@@ -531,25 +628,31 @@ func (s *Server) handleRegister(sub *connSub, payload []byte) error {
 func (s *Server) handleSearch(sub *connSub, payload []byte) error {
 	ver, query, limit, err := parseSearch(payload)
 	if err != nil {
+		s.logger.Printf("[userdir] [%s] SEARCH: parse failed: %v", sub.id, err)
 		s.sendError(sub, errBadRequest, err.Error())
 		return err
 	}
+	s.logger.Printf("[userdir] [%s] SEARCH: ver=%d query=%q limit=%d", sub.id, ver, query, limit)
+
 	if ver != 1 {
+		s.logger.Printf("[userdir] [%s] SEARCH: unsupported version %d", sub.id, ver)
 		s.sendError(sub, errBadRequest, "unsupported version")
 		return nil
 	}
 	if limit == 0 || limit > s.searchMax {
+		s.logger.Printf("[userdir] [%s] SEARCH: clamping limit %d → %d", sub.id, limit, s.searchMax)
 		limit = s.searchMax
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
 	res, err := s.store.Search(ctx, query, int(limit))
 	if err != nil {
+		s.logger.Printf("[userdir] [%s] SEARCH: db error: %v", sub.id, err)
 		s.sendError(sub, errInternal, "storage error")
 		return err
 	}
+	s.logger.Printf("[userdir] [%s] SEARCH: query=%q → %d result(s)", sub.id, query, len(res))
 
 	frame := buildSearchResultsFrame(res)
 	sub.deliver(frame)
@@ -559,9 +662,12 @@ func (s *Server) handleSearch(sub *connSub, payload []byte) error {
 func (s *Server) handleGetProfile(sub *connSub, payload []byte) error {
 	ver, pubkey, err := parseGetProfile(payload)
 	if err != nil {
+		s.logger.Printf("[userdir] [%s] GET_PROFILE: parse failed: %v", sub.id, err)
 		s.sendError(sub, errBadRequest, err.Error())
 		return err
 	}
+	s.logger.Printf("[userdir] [%s] GET_PROFILE: ver=%d pubkey=%s", sub.id, ver, shortKey(pubkey))
+
 	if ver != 1 {
 		s.sendError(sub, errBadRequest, "unsupported version")
 		return nil
@@ -569,16 +675,19 @@ func (s *Server) handleGetProfile(sub *connSub, payload []byte) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
 	p, ok, err := s.store.GetByPubKey(ctx, pubkey)
 	if err != nil {
+		s.logger.Printf("[userdir] [%s] GET_PROFILE: db error: %v", sub.id, err)
 		s.sendError(sub, errInternal, "storage error")
 		return err
 	}
 	if !ok {
+		s.logger.Printf("[userdir] [%s] GET_PROFILE: pubkey=%s not found", sub.id, shortKey(pubkey))
 		s.sendError(sub, errNotFound, "not found")
 		return nil
 	}
+	s.logger.Printf("[userdir] [%s] GET_PROFILE: pubkey=%s found username=%q avatarLen=%d updatedAt=%s",
+		sub.id, shortKey(pubkey), p.Username, len(p.Avatar), p.UpdatedAt.Format(time.RFC3339))
 
 	frame := buildProfileFrame(p)
 	sub.deliver(frame)
@@ -588,9 +697,12 @@ func (s *Server) handleGetProfile(sub *connSub, payload []byte) error {
 func (s *Server) handleGetMeta(sub *connSub, payload []byte) error {
 	ver, pubkey, err := parseGetMeta(payload)
 	if err != nil {
+		s.logger.Printf("[userdir] [%s] GET_META: parse failed: %v", sub.id, err)
 		s.sendError(sub, errBadRequest, err.Error())
 		return err
 	}
+	s.logger.Printf("[userdir] [%s] GET_META: ver=%d pubkey=%s", sub.id, ver, shortKey(pubkey))
+
 	if ver != 1 {
 		s.sendError(sub, errBadRequest, "unsupported version")
 		return nil
@@ -598,75 +710,86 @@ func (s *Server) handleGetMeta(sub *connSub, payload []byte) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
 	p, ok, err := s.store.GetByPubKey(ctx, pubkey)
 	if err != nil {
+		s.logger.Printf("[userdir] [%s] GET_META: db error: %v", sub.id, err)
 		s.sendError(sub, errInternal, "storage error")
 		return err
 	}
 	if !ok {
+		s.logger.Printf("[userdir] [%s] GET_META: pubkey=%s not found", sub.id, shortKey(pubkey))
 		s.sendError(sub, errNotFound, "not found")
 		return nil
 	}
+	s.logger.Printf("[userdir] [%s] GET_META: pubkey=%s found username=%q updatedAt=%s avatarSHA=%s",
+		sub.id, shortKey(pubkey), p.Username, p.UpdatedAt.Format(time.RFC3339),
+		hex.EncodeToString(p.AvatarSHA256[:4]))
 
 	frame := buildMetaFrame(p)
 	sub.deliver(frame)
 	return nil
 }
 
-// handleSubscribe adds pubkeys to the connection's subscription set.
 func (s *Server) handleSubscribe(sub *connSub, payload []byte) error {
 	ver, pubkeys, err := parseSubscribe(payload)
 	if err != nil {
+		s.logger.Printf("[userdir] [%s] SUBSCRIBE: parse failed: %v", sub.id, err)
 		s.sendError(sub, errBadRequest, err.Error())
 		return err
 	}
+	s.logger.Printf("[userdir] [%s] SUBSCRIBE: ver=%d count=%d currentSubs=%d",
+		sub.id, ver, len(pubkeys), sub.subCount())
+
 	if ver != 1 {
 		s.sendError(sub, errBadRequest, "unsupported version")
 		return nil
 	}
 	if len(pubkeys) == 0 {
+		s.logger.Printf("[userdir] [%s] SUBSCRIBE: empty list, nothing to do", sub.id)
 		s.sendOK(sub, "OK")
 		return nil
 	}
 
 	max := s.subscribeMax
 	if max < 0 {
-		max = 0 // 0 in subscribe() means unlimited
+		max = 0
 	}
 
 	added, limitReached := sub.subscribe(pubkeys, max)
+	s.logger.Printf("[userdir] [%s] SUBSCRIBE: requested=%d added=%d limitReached=%v currentSubs=%d",
+		sub.id, len(pubkeys), len(added), limitReached, sub.subCount())
+
 	if limitReached {
-		s.sendError(sub, errBadRequest, fmt.Sprintf("subscribe limit reached (%d)", s.subscribeMax))
+		msg := fmt.Sprintf("subscribe limit reached (%d)", s.subscribeMax)
+		s.logger.Printf("[userdir] [%s] SUBSCRIBE: %s", sub.id, msg)
+		s.sendError(sub, errBadRequest, msg)
 		return nil
 	}
 
-	// Register only the newly added keys in the server map.
-	newKeys := make([][32]byte, 0, added)
-	sub.mu.Lock()
-	for _, k := range pubkeys {
-		if _, ok := sub.keys[k]; ok {
-			newKeys = append(newKeys, k)
-			if len(newKeys) == added {
-				break
-			}
+	s.registerSub(sub, added)
+
+	if len(added) > 0 {
+		keys := make([]string, 0, len(added))
+		for _, k := range added {
+			keys = append(keys, shortKey(k))
 		}
+		s.logger.Printf("[userdir] [%s] SUBSCRIBE: registered keys=%v", sub.id, keys)
 	}
-	sub.mu.Unlock()
-	s.registerSub(sub, newKeys)
 
 	s.sendOK(sub, "OK")
 	return nil
 }
 
-// handleUnsubscribe removes pubkeys from the connection's subscription set.
-// count == 0 means unsubscribe from everything.
 func (s *Server) handleUnsubscribe(sub *connSub, payload []byte) error {
-	ver, pubkeys, err := parseSubscribe(payload) // same wire format
+	ver, pubkeys, err := parseSubscribe(payload)
 	if err != nil {
+		s.logger.Printf("[userdir] [%s] UNSUBSCRIBE: parse failed: %v", sub.id, err)
 		s.sendError(sub, errBadRequest, err.Error())
 		return err
 	}
+	s.logger.Printf("[userdir] [%s] UNSUBSCRIBE: ver=%d count=%d currentSubs=%d",
+		sub.id, ver, len(pubkeys), sub.subCount())
+
 	if ver != 1 {
 		s.sendError(sub, errBadRequest, "unsupported version")
 		return nil
@@ -674,11 +797,13 @@ func (s *Server) handleUnsubscribe(sub *connSub, payload []byte) error {
 
 	var removed [][32]byte
 	if len(pubkeys) == 0 {
+		s.logger.Printf("[userdir] [%s] UNSUBSCRIBE: unsubscribing from ALL", sub.id)
 		removed = sub.unsubscribeAll()
 	} else {
 		removed = sub.unsubscribe(pubkeys)
 	}
 	s.deregisterSub(sub, removed)
+	s.logger.Printf("[userdir] [%s] UNSUBSCRIBE: removed=%d remaining=%d", sub.id, len(removed), sub.subCount())
 
 	s.sendOK(sub, "OK")
 	return nil
@@ -768,7 +893,7 @@ func buildFrame(typ byte, payload []byte) []byte {
 	return frame
 }
 
-// ─── Parsers (kept here to avoid splitting across files) ─────────────────────
+// ─── Parsers ─────────────────────────────────────────────────────────────────
 
 func parseRegister(payload []byte, avatarMax uint32) (ver byte, username, fullname string, pubkey [32]byte, avatar []byte, sigAlg byte, sig []byte, signed []byte, err error) {
 	if len(payload) < 1+2+2+32+4+1+64 {
