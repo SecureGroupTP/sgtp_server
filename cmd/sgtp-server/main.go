@@ -15,15 +15,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/SecureGroupTP/sgtp_server/internal/mtransport"
 	"github.com/SecureGroupTP/sgtp_server/server"
 	"github.com/SecureGroupTP/sgtp_server/userdir"
 )
 
 func main() {
-	addr, err := listenAddrFromEnv()
-	if err != nil {
-		log.Fatalf("[server] invalid env: %v", err)
-	}
 	shutdownTimeout, err := durationFromEnv("SHUTDOWN_TIMEOUT", 10*time.Second)
 	if err != nil {
 		log.Fatalf("[server] invalid env: %v", err)
@@ -33,6 +30,13 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// If DISCOVERY_PORT is set, run in multi-transport mode. Otherwise keep the
+	// legacy behavior (single raw TCP listener on SERVER_ADDR/SERVER_PORT).
+	discoveryPort, err := portFromEnvAllowZero("DISCOVERY_PORT", 0)
+	if err != nil {
+		log.Fatalf("[server] invalid env: %v", err)
+	}
 
 	// ── Optional userdir (enabled when PG_DSN is set) ────────────────────────
 	var ud *userdir.Server
@@ -84,18 +88,76 @@ func main() {
 		logger.Printf("[server] userdir enabled (inline mux on same port)")
 	}
 
-	srv := server.New(addr, logger, ud)
+	if discoveryPort == 0 {
+		addr, err := listenAddrFromEnv()
+		if err != nil {
+			log.Fatalf("[server] invalid env: %v", err)
+		}
+		srv := server.New(addr, logger, ud)
 
-	go func() {
-		<-ctx.Done()
-		sctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-		_ = srv.Shutdown(sctx)
-	}()
+		go func() {
+			<-ctx.Done()
+			sctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+			defer cancel()
+			_ = srv.Shutdown(sctx)
+		}()
 
-	if err := srv.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
-		logger.Fatalf("[server] exited with error: %v", err)
+		if err := srv.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
+			logger.Fatalf("[server] exited with error: %v", err)
+		}
+		logger.Printf("[server] stopped")
+		return
 	}
+
+	ports, err := multiPortsFromEnv()
+	if err != nil {
+		logger.Fatalf("[server] invalid env: %v", err)
+	}
+
+	httpRecvTimeout, err := durationFromEnv("HTTP_RECV_TIMEOUT", 60*time.Second)
+	if err != nil {
+		logger.Fatalf("[server] invalid HTTP_RECV_TIMEOUT: %v", err)
+	}
+	httpSendMax, err := int64FromEnv("HTTP_SEND_MAX_BYTES", 16<<20)
+	if err != nil {
+		logger.Fatalf("[server] invalid HTTP_SEND_MAX_BYTES: %v", err)
+	}
+	httpBuf, err := intFromEnv("HTTP_SESSION_BUFFER_BYTES", 4<<20)
+	if err != nil {
+		logger.Fatalf("[server] invalid HTTP_SESSION_BUFFER_BYTES: %v", err)
+	}
+	httpTTL, err := durationFromEnv("HTTP_SESSION_TTL", 10*time.Minute)
+	if err != nil {
+		logger.Fatalf("[server] invalid HTTP_SESSION_TTL: %v", err)
+	}
+	httpCleanup, err := durationFromEnv("HTTP_SESSION_CLEANUP", 1*time.Minute)
+	if err != nil {
+		logger.Fatalf("[server] invalid HTTP_SESSION_CLEANUP: %v", err)
+	}
+
+	relay := server.New("", logger, ud)
+	ms := &mtransport.MultiServer{
+		Logger:           logger,
+		Relay:            relay,
+		BindHost:         os.Getenv("BIND_HOST"),
+		DiscoveryPort:    discoveryPort,
+		Ports:            ports,
+		HTTPRecvTimeout:  httpRecvTimeout,
+		HTTPSendMax:      httpSendMax,
+		HTTPBufferBytes:  httpBuf,
+		HTTPSessionTTL:   httpTTL,
+		HTTPCleanupEvery: httpCleanup,
+	}
+
+	if err := ms.Start(ctx); err != nil {
+		logger.Fatalf("[server] start: %v", err)
+	}
+
+	<-ctx.Done()
+	sctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	_ = ms.Shutdown(sctx)
+	_ = relay.Shutdown(sctx)
 	logger.Printf("[server] stopped")
 }
 
@@ -112,6 +174,44 @@ func listenAddrFromEnv() (string, error) {
 		return "", fmt.Errorf("SERVER_PORT must be 1..65535, got %q", portStr)
 	}
 	return ":" + strconv.Itoa(port), nil
+}
+
+func multiPortsFromEnv() (mtransport.Ports, error) {
+	// For convenience, TCP_PORT defaults to SERVER_PORT when unset.
+	tcpPort, err := portFromEnvAllowZeroFallback("TCP_PORT", "SERVER_PORT", 7777)
+	if err != nil {
+		return mtransport.Ports{}, err
+	}
+
+	tcpTLSPort, err := portFromEnvAllowZero("TCP_TLS_PORT", 0)
+	if err != nil {
+		return mtransport.Ports{}, err
+	}
+	httpPort, err := portFromEnvAllowZero("HTTP_PORT", 0)
+	if err != nil {
+		return mtransport.Ports{}, err
+	}
+	httpTLSPort, err := portFromEnvAllowZero("HTTP_TLS_PORT", 0)
+	if err != nil {
+		return mtransport.Ports{}, err
+	}
+	wsPort, err := portFromEnvAllowZero("WS_PORT", 0)
+	if err != nil {
+		return mtransport.Ports{}, err
+	}
+	wsTLSPort, err := portFromEnvAllowZero("WS_TLS_PORT", 0)
+	if err != nil {
+		return mtransport.Ports{}, err
+	}
+
+	return mtransport.Ports{
+		TCP:     tcpPort,
+		TCPTLS:  tcpTLSPort,
+		HTTP:    httpPort,
+		HTTPTLS: httpTLSPort,
+		WS:      wsPort,
+		WSTLS:   wsTLSPort,
+	}, nil
 }
 
 func durationFromEnv(key string, def time.Duration) (time.Duration, error) {
@@ -156,4 +256,35 @@ func int64FromEnv(key string, def int64) (int64, error) {
 		return 0, fmt.Errorf("%s: %w", key, err)
 	}
 	return n, nil
+}
+
+func intFromEnv(key string, def int) (int, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", key, err)
+	}
+	return n, nil
+}
+
+func portFromEnvAllowZero(key string, def uint16) (uint16, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 || n > 65535 {
+		return 0, fmt.Errorf("%s must be 0..65535, got %q", key, v)
+	}
+	return uint16(n), nil
+}
+
+func portFromEnvAllowZeroFallback(key, fallbackKey string, fallbackDef uint16) (uint16, error) {
+	if v := os.Getenv(key); v != "" {
+		return portFromEnvAllowZero(key, 0)
+	}
+	return portFromEnvAllowZero(fallbackKey, fallbackDef)
 }

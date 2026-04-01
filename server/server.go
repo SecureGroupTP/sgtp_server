@@ -247,12 +247,22 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 			return fmt.Errorf("sgtp: accept: %w", err)
 		}
 
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
-			s.handleConn(ctx, nc)
-		}()
+		s.ServeConnAsync(ctx, nc)
 	}
+}
+
+// ServeConn handles an already-accepted connection and blocks until it exits.
+// The connection is tracked so Shutdown() waits for it to fully exit.
+func (s *Server) ServeConn(ctx context.Context, nc net.Conn) {
+	s.wg.Add(1)
+	defer s.wg.Done()
+	s.handleConn(ctx, nc)
+}
+
+// ServeConnAsync is a convenience wrapper around ServeConn that runs the
+// connection handler in its own goroutine.
+func (s *Server) ServeConnAsync(ctx context.Context, nc net.Conn) {
+	go s.ServeConn(ctx, nc)
 }
 
 func (s *Server) initiateClose() {

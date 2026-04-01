@@ -37,10 +37,32 @@ The relay reads the first 32 bytes of every new connection. If they are all zero
 
 ## Server env variables
 
-Relay-only (always required):
+Legacy mode (default; no discovery):
 
 - `SERVER_PORT` — TCP port inside the container (default: `7777`)
+- `SERVER_ADDR` — optional listen address (e.g. `0.0.0.0:7777`)
 - `SHUTDOWN_TIMEOUT` — graceful shutdown timeout (default: `10s`)
+
+Multi-transport mode (discovery + per-transport ports):
+
+- Set `DISCOVERY_PORT` to a non-zero port to enable discovery on plain TCP.
+  - When enabled, the server does **not** use `SERVER_ADDR` / `SERVER_PORT` for serving discovery (it uses `DISCOVERY_PORT`).
+  - For convenience, `TCP_PORT` defaults to `SERVER_PORT` when `TCP_PORT` is unset.
+- Per-transport ports (set to `0` to disable):
+  - `TCP_PORT`
+  - `TCP_TLS_PORT` (TLS currently disabled at build time; must stay `0`)
+  - `HTTP_PORT`
+  - `HTTP_TLS_PORT` (TLS currently disabled at build time; must stay `0`)
+  - `WS_PORT`
+  - `WS_TLS_PORT` (TLS currently disabled at build time; must stay `0`)
+- Optional bind host:
+  - `BIND_HOST` — e.g. `0.0.0.0` (default: empty = all interfaces)
+- HTTP transport tuning:
+  - `HTTP_RECV_TIMEOUT` (default: `60s`)
+  - `HTTP_SEND_MAX_BYTES` (default: `16777216` = 16 MiB)
+  - `HTTP_SESSION_BUFFER_BYTES` (default: `4194304` = 4 MiB per direction)
+  - `HTTP_SESSION_TTL` (default: `10m`)
+  - `HTTP_SESSION_CLEANUP` (default: `1m`)
 
 User directory (enabled when `PG_DSN` is set; both `sgtp_chat` and `sgtp_voice` set it):
 
