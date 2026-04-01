@@ -75,6 +75,9 @@ WHERE expires_at <> 'infinity'::timestamptz;
 
 func (s *Store) UpsertProfile(ctx context.Context, pubkey [32]byte, username, fullname string, avatar []byte) error {
 	now := time.Now().UTC()
+	if avatar == nil {
+		avatar = []byte{}
+	}
 	sha := sha256.Sum256(avatar)
 	var usernameDB any
 	if strings.TrimSpace(username) == "" {
