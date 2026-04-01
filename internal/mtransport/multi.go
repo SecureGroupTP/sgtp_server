@@ -55,6 +55,12 @@ func (m *MultiServer) Start(ctx context.Context) error {
 	m.httpLns = make(map[uint16]net.Listener)
 	m.httpSrvs = make(map[uint16]*http.Server)
 
+	// Pre-compute the 25-byte discovery payload once; it is sent on both the
+	// dedicated discovery port (if configured) AND the plain TCP relay port.
+	// This lets clients use the TCP relay port for "Fetch server options"
+	// without needing to know a separate discovery port.
+	discoveryResp := m.Ports.DiscoveryResponse()
+
 	// ── Discovery ───────────────────────────────────────────────────────────
 	if m.DiscoveryPort != 0 {
 		ln, err := net.Listen("tcp", m.listenAddr(m.DiscoveryPort))
@@ -62,9 +68,8 @@ func (m *MultiServer) Start(ctx context.Context) error {
 			return fmt.Errorf("discovery listen: %w", err)
 		}
 		m.discoveryLn = ln
-		resp := m.Ports.DiscoveryResponse()
 		m.Logger.Printf("[discovery] listening on %s", ln.Addr().String())
-		go m.serveDiscovery(ctx, ln, resp[:])
+		go m.serveDiscovery(ctx, ln, discoveryResp[:])
 	}
 
 	// ── TCP ─────────────────────────────────────────────────────────────────
@@ -75,7 +80,7 @@ func (m *MultiServer) Start(ctx context.Context) error {
 		}
 		m.tcpLn = ln
 		m.Logger.Printf("[tcp] listening on %s", ln.Addr().String())
-		go m.serveTCP(ctx, ln)
+		go m.serveTCP(ctx, ln, discoveryResp[:])
 	}
 
 	// ── HTTP / WS (plain) ───────────────────────────────────────────────────
@@ -188,7 +193,7 @@ func (m *MultiServer) serveDiscovery(ctx context.Context, ln net.Listener, resp 
 				return
 			}
 			m.Logger.Printf("[discovery] accept error: %v", err)
-			return
+			continue // BUG FIX: was 'return' — caused the loop to stop on any transient error
 		}
 		go func(c net.Conn) {
 			_ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
@@ -198,7 +203,15 @@ func (m *MultiServer) serveDiscovery(ctx context.Context, ln net.Listener, resp 
 	}
 }
 
-func (m *MultiServer) serveTCP(ctx context.Context, ln net.Listener) {
+// serveTCP accepts raw TCP connections and sends the 25-byte discovery header
+// immediately before handing each connection to the relay server.
+//
+// Sending the discovery payload upfront lets clients connect to the TCP relay
+// port for "Fetch server options" without requiring a separate discovery port.
+// Discovery clients (server_discovery.dart) read the 25 bytes and close.
+// Relay clients (TcpSgtpTransport) read and discard those 25 bytes and then
+// proceed with the normal SGTP relay handshake.
+func (m *MultiServer) serveTCP(ctx context.Context, ln net.Listener, discoveryResp []byte) {
 	for {
 		nc, err := ln.Accept()
 		if err != nil {
@@ -206,9 +219,20 @@ func (m *MultiServer) serveTCP(ctx context.Context, ln net.Listener) {
 				return
 			}
 			m.Logger.Printf("[tcp] accept error: %v", err)
-			return
+			continue // BUG FIX: was 'return' — stopped accepting on transient errors
 		}
-		m.Relay.ServeConnAsync(ctx, nc)
+		go func(c net.Conn) {
+			// Send discovery bytes first so clients can detect transport options
+			// without a dedicated discovery port.
+			_ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
+			if err := writeAll(c, discoveryResp); err != nil {
+				m.Logger.Printf("[tcp] write discovery header: %v", err)
+				_ = c.Close()
+				return
+			}
+			_ = c.SetWriteDeadline(time.Time{})
+			m.Relay.ServeConn(ctx, c)
+		}(nc)
 	}
 }
 
