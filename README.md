@@ -67,11 +67,10 @@ Multi-transport mode (discovery + per-transport ports):
 User directory (enabled when `PG_DSN` is set; both `sgtp_chat` and `sgtp_voice` set it):
 
 - `PG_DSN` — Postgres DSN, e.g. `postgres://userdir:userdir@userdir_db:5432/userdir?sslmode=disable`
-- `PROFILE_TTL` — how long profiles are kept (default: `24h`)
 - `AVATAR_MAX_BYTES` — max avatar size (default: `33554432` = 32 MiB)
 - `SEARCH_MAX_RESULTS` — hard cap for search responses (default: `20`)
 - `SUBSCRIBE_MAX` — max pubkeys one connection may subscribe to at once (default: `500`)
-- `CLEANUP_INTERVAL` — how often expired rows are deleted (default: `5m`)
+- `CLEANUP_INTERVAL` — cleanup loop interval (default: `5m`; currently profiles are stored indefinitely)
 
 ## Userdir wire protocol (binary, big-endian)
 
@@ -106,14 +105,14 @@ If `frame_len` exceeds the configured maximum (derived from `AVATAR_MAX_BYTES`) 
 
 ### REGISTER / UPDATE (`0x01`)
 
-Profile identity is the **public key** (`pubkey`). Sending REGISTER again with the same `pubkey` overwrites `username`, `fullname`, and `avatar` (upsert). Stored rows expire after `PROFILE_TTL`.
+Profile identity is the **public key** (`pubkey`). Sending REGISTER again with the same `pubkey` overwrites `username`, `fullname`, and `avatar` (upsert). Profiles are stored indefinitely.
 
 Payload:
 
 ```
 u8     version          // 1
 u16    username_len
-u8[]   username         // UTF-8; must match ^@[A-Za-z0-9_]{1,32}$
+u8[]   username         // UTF-8; optional (username_len may be 0). If non-empty: ^@[A-Za-z0-9_]{1,32}$
 u16    fullname_len
 u8[]   fullname         // UTF-8
 u8[32] pubkey           // Ed25519 public key
@@ -138,7 +137,7 @@ Request payload:
 ```
 u8   version            // 1
 u16  query_len
-u8[] query              // UTF-8
+u8[] query              // UTF-8; empty query returns 0 results
 u16  limit              // clamped to SEARCH_MAX_RESULTS
 ```
 

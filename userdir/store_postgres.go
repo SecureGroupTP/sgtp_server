@@ -4,15 +4,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
-	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 type Store struct {
-	db  *sql.DB
-	ttl time.Duration
+	db *sql.DB
 }
 
 type Profile struct {
@@ -22,13 +21,9 @@ type Profile struct {
 	Avatar       []byte
 	AvatarSHA256 [32]byte
 	UpdatedAt    time.Time
-	ExpiresAt    time.Time
 }
 
-func OpenStore(ctx context.Context, dsn string, ttl time.Duration) (*Store, error) {
-	if ttl <= 0 {
-		return nil, fmt.Errorf("userdir: ttl must be > 0")
-	}
+func OpenStore(ctx context.Context, dsn string) (*Store, error) {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, err
@@ -37,7 +32,7 @@ func OpenStore(ctx context.Context, dsn string, ttl time.Duration) (*Store, erro
 	db.SetMaxIdleConns(10)
 	db.SetConnMaxLifetime(30 * time.Minute)
 
-	s := &Store{db: db, ttl: ttl}
+	s := &Store{db: db}
 	if err := s.Ping(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -57,21 +52,36 @@ func (s *Store) InitSchema(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS user_profiles (
   pubkey bytea PRIMARY KEY,
-  username text NOT NULL,
+  username text,
   fullname text NOT NULL,
   avatar bytea NOT NULL,
   avatar_sha256 bytea NOT NULL,
   updated_at timestamptz NOT NULL,
   expires_at timestamptz NOT NULL
 );
+
+ALTER TABLE user_profiles
+  ALTER COLUMN username DROP NOT NULL;
+
+ALTER TABLE user_profiles
+  ALTER COLUMN expires_at SET DEFAULT 'infinity'::timestamptz;
+
+UPDATE user_profiles
+SET expires_at = 'infinity'::timestamptz
+WHERE expires_at <> 'infinity'::timestamptz;
 `)
 	return err
 }
 
 func (s *Store) UpsertProfile(ctx context.Context, pubkey [32]byte, username, fullname string, avatar []byte) error {
 	now := time.Now().UTC()
-	expires := now.Add(s.ttl)
 	sha := sha256.Sum256(avatar)
+	var usernameDB any
+	if strings.TrimSpace(username) == "" {
+		usernameDB = nil
+	} else {
+		usernameDB = username
+	}
 
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO user_profiles (pubkey, username, fullname, avatar, avatar_sha256, updated_at, expires_at)
@@ -83,7 +93,7 @@ ON CONFLICT (pubkey) DO UPDATE SET
   avatar_sha256 = EXCLUDED.avatar_sha256,
   updated_at = EXCLUDED.updated_at,
   expires_at = EXCLUDED.expires_at
-`, pubkey[:], username, fullname, avatar, sha[:], now, expires)
+`, pubkey[:], usernameDB, fullname, avatar, sha[:], now, "infinity")
 	return err
 }
 
@@ -98,11 +108,13 @@ func (s *Store) Search(ctx context.Context, q string, limit int) ([]SearchResult
 	if limit <= 0 {
 		return nil, nil
 	}
+	if strings.TrimSpace(q) == "" {
+		return nil, nil
+	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT pubkey, username, fullname, avatar_sha256
+SELECT pubkey, COALESCE(username, ''), fullname, avatar_sha256
 FROM user_profiles
-WHERE expires_at > now()
-  AND (
+WHERE (
     position(lower($1) in lower(username)) > 0
     OR position(lower($1) in lower(fullname)) > 0
   )
@@ -135,15 +147,15 @@ LIMIT $2
 
 func (s *Store) GetByPubKey(ctx context.Context, pubkey [32]byte) (*Profile, bool, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT username, fullname, avatar, avatar_sha256, updated_at, expires_at
+SELECT COALESCE(username, ''), fullname, avatar, avatar_sha256, updated_at
 FROM user_profiles
-WHERE pubkey = $1 AND expires_at > now()
+WHERE pubkey = $1
 `, pubkey[:])
 
 	var p Profile
 	p.PubKey = pubkey
 	var sha []byte
-	if err := row.Scan(&p.Username, &p.FullName, &p.Avatar, &sha, &p.UpdatedAt, &p.ExpiresAt); err != nil {
+	if err := row.Scan(&p.Username, &p.FullName, &p.Avatar, &sha, &p.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, false, nil
 		}

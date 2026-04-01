@@ -41,10 +41,6 @@ func main() {
 	// ── Optional userdir (enabled when PG_DSN is set) ────────────────────────
 	var ud *userdir.Server
 	if dsn := os.Getenv("PG_DSN"); dsn != "" {
-		ttl, err := durationFromEnv("PROFILE_TTL", 24*time.Hour)
-		if err != nil {
-			logger.Fatalf("[server] invalid PROFILE_TTL: %v", err)
-		}
 		avatarMax, err := uint32FromEnv("AVATAR_MAX_BYTES", 33554432)
 		if err != nil {
 			logger.Fatalf("[server] invalid AVATAR_MAX_BYTES: %v", err)
@@ -63,7 +59,7 @@ func main() {
 			logger.Fatalf("[server] invalid SUBSCRIBE_MAX: %v", err)
 		}
 
-		store, err := userdir.OpenStore(ctx, dsn, ttl)
+		store, err := userdir.OpenStore(ctx, dsn)
 		if err != nil {
 			logger.Fatalf("[server] userdir open store: %v", err)
 		}

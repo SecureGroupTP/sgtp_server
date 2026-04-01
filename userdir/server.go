@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -592,7 +593,7 @@ func (s *Server) handleRegister(sub *connSub, payload []byte) error {
 		s.sendError(sub, errBadRequest, "unsupported signature algorithm")
 		return nil
 	}
-	if !usernameRe.MatchString(username) {
+	if username != "" && !usernameRe.MatchString(username) {
 		s.logger.Printf("[userdir] [%s] REGISTER: invalid username format %q", sub.id, username)
 		s.sendError(sub, errBadRequest, "invalid username format")
 		return nil
@@ -642,6 +643,11 @@ func (s *Server) handleSearch(sub *connSub, payload []byte) error {
 	if limit == 0 || limit > s.searchMax {
 		s.logger.Printf("[userdir] [%s] SEARCH: clamping limit %d → %d", sub.id, limit, s.searchMax)
 		limit = s.searchMax
+	}
+	if strings.TrimSpace(query) == "" {
+		s.logger.Printf("[userdir] [%s] SEARCH: empty query -> 0 result(s)", sub.id)
+		sub.deliver(buildSearchResultsFrame(nil))
+		return nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -905,7 +911,7 @@ func parseRegister(payload []byte, avatarMax uint32) (ver byte, username, fullna
 
 	ulen := int(binary.BigEndian.Uint16(payload[off : off+2]))
 	off += 2
-	if ulen <= 0 || off+ulen > len(payload) {
+	if off+ulen > len(payload) {
 		return 0, "", "", [32]byte{}, nil, 0, nil, nil, fmt.Errorf("invalid username length")
 	}
 	username = string(payload[off : off+ulen])
