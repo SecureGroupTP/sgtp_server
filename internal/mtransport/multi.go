@@ -172,7 +172,7 @@ func (m *MultiServer) Start(ctx context.Context) error {
 			return fmt.Errorf("http/ws listen (%d): %w", port, err)
 		}
 		srv := &http.Server{
-			Handler:           mux,
+			Handler:           wrapCORS(mux),
 			ReadHeaderTimeout: 5 * time.Second,
 			IdleTimeout:       120 * time.Second,
 		}
@@ -193,7 +193,7 @@ func (m *MultiServer) Start(ctx context.Context) error {
 			return fmt.Errorf("http/tls listen (%d): %w", port, err)
 		}
 		srv := &http.Server{
-			Handler:           mux,
+			Handler:           wrapCORS(mux),
 			ReadHeaderTimeout: 5 * time.Second,
 			IdleTimeout:       120 * time.Second,
 		}
@@ -209,6 +209,19 @@ func (m *MultiServer) Start(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func wrapCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (m *MultiServer) Shutdown(ctx context.Context) error {
