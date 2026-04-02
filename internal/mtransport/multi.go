@@ -91,6 +91,15 @@ func (m *MultiServer) Start(ctx context.Context) error {
 		m.Logger.Printf("[tcp] listening on %s", ln.Addr().String())
 		go m.serveTCP(ctx, ln, discoveryResp[:])
 	}
+	if m.Ports.TCPTLS != 0 {
+		ln, err := tls.Listen("tcp", m.listenAddr(m.Ports.TCPTLS), m.TLSConfig)
+		if err != nil {
+			return fmt.Errorf("tcp tls listen: %w", err)
+		}
+		m.tlsTCPLn = ln
+		m.Logger.Printf("[tcp tls] listening on %s", ln.Addr().String())
+		go m.serveTCP(ctx, ln, discoveryResp[:])
+	}
 
 	// ── HTTP / WS (plain + TLS) ──────────────────────────────────────────────
 	newMux := func() *http.ServeMux {
