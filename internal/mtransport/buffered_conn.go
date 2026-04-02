@@ -49,20 +49,35 @@ func (d *pipeDir) close() {
 }
 
 func (d *pipeDir) write(p []byte) (int, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.closed {
-		return 0, io.ErrClosedPipe
-	}
-	if d.maxSize > 0 && d.buf.Len()+len(p) > d.maxSize {
+	if d.maxSize > 0 && len(p) > d.maxSize {
 		return 0, errBufferFull
 	}
-	_, _ = d.buf.Write(p)
-	select {
-	case d.notify <- struct{}{}:
-	default:
+
+	for {
+		d.mu.Lock()
+		if d.closed {
+			d.mu.Unlock()
+			return 0, io.ErrClosedPipe
+		}
+		if d.maxSize <= 0 || d.buf.Len()+len(p) <= d.maxSize {
+			_, _ = d.buf.Write(p)
+			d.mu.Unlock()
+			select {
+			case d.notify <- struct{}{}:
+			default:
+			}
+			return len(p), nil
+		}
+		closeCh := d.closeCh
+		notify := d.notify
+		d.mu.Unlock()
+
+		select {
+		case <-notify:
+		case <-closeCh:
+			return 0, io.ErrClosedPipe
+		}
 	}
-	return len(p), nil
 }
 
 func (d *pipeDir) read(p []byte, deadline time.Time) (int, error) {
@@ -71,6 +86,11 @@ func (d *pipeDir) read(p []byte, deadline time.Time) (int, error) {
 		if d.buf.Len() > 0 {
 			n, _ := d.buf.Read(p)
 			d.mu.Unlock()
+			// Wake blocked writers that are waiting for free space.
+			select {
+			case d.notify <- struct{}{}:
+			default:
+			}
 			return n, nil
 		}
 		closed := d.closed

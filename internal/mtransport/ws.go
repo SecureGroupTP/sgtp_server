@@ -39,34 +39,43 @@ func (h WSHandler) handle(w http.ResponseWriter, r *http.Request) {
 	if h.Logger == nil {
 		h.Logger = log.Default()
 	}
+	h.Logger.Printf("[ws] request method=%s path=%s remote=%s", r.Method, r.URL.Path, r.RemoteAddr)
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		h.Logger.Printf("[ws] reject remote=%s reason=method_not_allowed", r.RemoteAddr)
 		return
 	}
 	if !headerHasToken(r.Header, "Connection", "Upgrade") || !headerHasToken(r.Header, "Upgrade", "websocket") {
 		http.Error(w, "upgrade required", http.StatusBadRequest)
+		h.Logger.Printf("[ws] reject remote=%s reason=upgrade_required", r.RemoteAddr)
 		return
 	}
 	if strings.ToLower(r.Header.Get("Sec-WebSocket-Version")) != "13" {
 		http.Error(w, "unsupported websocket version", http.StatusBadRequest)
+		h.Logger.Printf("[ws] reject remote=%s reason=unsupported_version version=%q", r.RemoteAddr, r.Header.Get("Sec-WebSocket-Version"))
 		return
 	}
 
 	key := strings.TrimSpace(r.Header.Get("Sec-WebSocket-Key"))
 	if key == "" {
 		http.Error(w, "missing Sec-WebSocket-Key", http.StatusBadRequest)
+		h.Logger.Printf("[ws] reject remote=%s reason=missing_key", r.RemoteAddr)
 		return
 	}
 
 	hj, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "hijacking not supported", http.StatusInternalServerError)
+		h.Logger.Printf("[ws] reject remote=%s reason=no_hijacker", r.RemoteAddr)
 		return
 	}
 	conn, rw, err := hj.Hijack()
 	if err != nil {
+		h.Logger.Printf("[ws] hijack failed remote=%s err=%v", r.RemoteAddr, err)
 		return
 	}
+	remote := conn.RemoteAddr().String()
+	h.Logger.Printf("[ws] hijacked remote=%s", remote)
 
 	br := rw.Reader
 	bw := rw.Writer
@@ -76,14 +85,19 @@ func (h WSHandler) handle(w http.ResponseWriter, r *http.Request) {
 	_, _ = bw.WriteString("Upgrade: websocket\r\n")
 	_, _ = bw.WriteString("Connection: Upgrade\r\n")
 	_, _ = bw.WriteString("Sec-WebSocket-Accept: " + accept + "\r\n")
+	// Explicitly deny extension negotiation for deterministic frame parsing.
+	_, _ = bw.WriteString("Sec-WebSocket-Extensions:\r\n")
 	_, _ = bw.WriteString("\r\n")
 	if err := bw.Flush(); err != nil {
+		h.Logger.Printf("[ws] handshake flush failed remote=%s err=%v", remote, err)
 		_ = conn.Close()
 		return
 	}
+	h.Logger.Printf("[ws] handshake complete remote=%s", remote)
 
-	ws := newWSStreamConn(conn, br, bw, 32<<20)
+	ws := newWSStreamConn(conn, br, bw, 32<<20, h.Logger)
 	h.Relay.ServeConn(h.Ctx, ws)
+	h.Logger.Printf("[ws] relay ServeConn finished remote=%s", remote)
 }
 
 func headerHasToken(h http.Header, key, token string) bool {
@@ -109,6 +123,8 @@ type wsStreamConn struct {
 	br *bufio.Reader
 	bw *bufio.Writer
 
+	logger *log.Logger
+
 	writeMu sync.Mutex
 
 	maxMsgBytes int
@@ -119,7 +135,7 @@ type wsStreamConn struct {
 	closeOnce sync.Once
 }
 
-func newWSStreamConn(c net.Conn, br *bufio.Reader, bw *bufio.Writer, maxMsgBytes int) *wsStreamConn {
+func newWSStreamConn(c net.Conn, br *bufio.Reader, bw *bufio.Writer, maxMsgBytes int, logger *log.Logger) *wsStreamConn {
 	if maxMsgBytes <= 0 {
 		maxMsgBytes = 32 << 20
 	}
@@ -127,6 +143,7 @@ func newWSStreamConn(c net.Conn, br *bufio.Reader, bw *bufio.Writer, maxMsgBytes
 		c:           c,
 		br:          br,
 		bw:          bw,
+		logger:      logger,
 		maxMsgBytes: maxMsgBytes,
 	}
 }
@@ -145,7 +162,13 @@ func (w *wsStreamConn) Read(p []byte) (int, error) {
 
 		msg, err := w.readMessage()
 		if err != nil {
+			if w.logger != nil {
+				w.logger.Printf("[ws] read message failed remote=%s err=%v", w.c.RemoteAddr().String(), err)
+			}
 			return 0, err
+		}
+		if w.logger != nil {
+			w.logger.Printf("[ws] read message remote=%s bytes=%d", w.c.RemoteAddr().String(), len(msg))
 		}
 		w.readBuf = msg
 		w.readPos = 0
@@ -157,21 +180,36 @@ func (w *wsStreamConn) Write(p []byte) (int, error) {
 	defer w.writeMu.Unlock()
 
 	if err := writeWSFrame(w.bw, wsOpBinary, p); err != nil {
+		if w.logger != nil {
+			w.logger.Printf("[ws] write frame failed remote=%s bytes=%d err=%v", w.c.RemoteAddr().String(), len(p), err)
+		}
 		return 0, err
 	}
 	if err := w.bw.Flush(); err != nil {
+		if w.logger != nil {
+			w.logger.Printf("[ws] flush failed remote=%s bytes=%d err=%v", w.c.RemoteAddr().String(), len(p), err)
+		}
 		return 0, err
+	}
+	if w.logger != nil {
+		w.logger.Printf("[ws] write binary remote=%s bytes=%d", w.c.RemoteAddr().String(), len(p))
 	}
 	return len(p), nil
 }
 
 func (w *wsStreamConn) Close() error {
 	w.closeOnce.Do(func() {
+		if w.logger != nil {
+			w.logger.Printf("[ws] close begin remote=%s", w.c.RemoteAddr().String())
+		}
 		w.writeMu.Lock()
 		_ = writeWSClose(w.bw, 1000, "")
 		_ = w.bw.Flush()
 		w.writeMu.Unlock()
 		_ = w.c.Close()
+		if w.logger != nil {
+			w.logger.Printf("[ws] close done remote=%s", w.c.RemoteAddr().String())
+		}
 	})
 	return nil
 }
@@ -205,22 +243,38 @@ func (w *wsStreamConn) readMessage() ([]byte, error) {
 
 		switch op {
 		case wsOpPing:
+			if w.logger != nil {
+				w.logger.Printf("[ws] recv ping remote=%s bytes=%d", w.c.RemoteAddr().String(), len(payload))
+			}
 			w.writeMu.Lock()
 			_ = writeWSFrame(w.bw, wsOpPong, payload)
 			_ = w.bw.Flush()
 			w.writeMu.Unlock()
+			if w.logger != nil {
+				w.logger.Printf("[ws] send pong remote=%s bytes=%d", w.c.RemoteAddr().String(), len(payload))
+			}
 			continue
 		case wsOpPong:
+			if w.logger != nil {
+				w.logger.Printf("[ws] recv pong remote=%s bytes=%d", w.c.RemoteAddr().String(), len(payload))
+			}
 			continue
 		case wsOpClose:
+			if w.logger != nil {
+				w.logger.Printf("[ws] recv close remote=%s bytes=%d", w.c.RemoteAddr().String(), len(payload))
+			}
 			w.writeMu.Lock()
 			_ = writeWSFrame(w.bw, wsOpClose, payload)
 			_ = w.bw.Flush()
 			w.writeMu.Unlock()
 			return nil, io.EOF
 		case wsOpText:
-			_ = w.Close()
-			return nil, errors.New("websocket: text messages not supported")
+			if started {
+				_ = w.Close()
+				return nil, errors.New("websocket: unexpected text frame while fragmented message in progress")
+			}
+			started = true
+			msg = append(msg, payload...)
 		case wsOpBinary:
 			if started {
 				_ = w.Close()

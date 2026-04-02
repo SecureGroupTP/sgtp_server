@@ -105,6 +105,7 @@ func (m *HTTPSessionManager) CloseAll() {
 	}
 	m.sessions = make(map[[16]byte]*httpSession)
 	m.mu.Unlock()
+	m.logger.Printf("[http] close-all sessions=%d", len(sessions))
 
 	for _, s := range sessions {
 		_ = s.clientNC.Close()
@@ -120,9 +121,11 @@ func (m *HTTPSessionManager) Register(mux *http.ServeMux) {
 }
 
 func (m *HTTPSessionManager) handleCreateSession(w http.ResponseWriter, r *http.Request) {
+	m.logger.Printf("[http] create-session request remote=%s", r.RemoteAddr)
 	select {
 	case <-m.ctx.Done():
 		http.Error(w, "server shutting down", http.StatusServiceUnavailable)
+		m.logger.Printf("[http] create-session rejected remote=%s reason=server_shutting_down", r.RemoteAddr)
 		return
 	default:
 	}
@@ -149,10 +152,12 @@ func (m *HTTPSessionManager) handleCreateSession(w http.ResponseWriter, r *http.
 		_ = serverNC.Close()
 		_ = clientNC.Close()
 		http.Error(w, "server shutting down", http.StatusServiceUnavailable)
+		m.logger.Printf("[http] create-session rejected remote=%s reason=manager_closed", r.RemoteAddr)
 		return
 	}
 	m.sessions[sid] = sess
 	m.mu.Unlock()
+	m.logger.Printf("[http] create-session ok remote=%s sid=%s", r.RemoteAddr, hex.EncodeToString(sid[:]))
 
 	m.relay.ServeConnAsync(m.ctx, serverNC)
 
@@ -165,8 +170,10 @@ func (m *HTTPSessionManager) handleDeleteSession(w http.ResponseWriter, r *http.
 	sid, ok := parseSID(r.URL.Query().Get("sid"))
 	if !ok {
 		http.Error(w, "bad sid", http.StatusBadRequest)
+		m.logger.Printf("[http] delete-session bad sid remote=%s sid=%q", r.RemoteAddr, r.URL.Query().Get("sid"))
 		return
 	}
+	m.logger.Printf("[http] delete-session remote=%s sid=%s", r.RemoteAddr, hex.EncodeToString(sid[:]))
 	m.deleteSession(sid)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -175,12 +182,16 @@ func (m *HTTPSessionManager) handleSend(w http.ResponseWriter, r *http.Request) 
 	sid, ok := parseSID(r.URL.Query().Get("sid"))
 	if !ok {
 		http.Error(w, "bad sid", http.StatusBadRequest)
+		m.logger.Printf("[http] send bad sid remote=%s sid=%q", r.RemoteAddr, r.URL.Query().Get("sid"))
 		return
 	}
+	sidHex := hex.EncodeToString(sid[:])
+	m.logger.Printf("[http] send request remote=%s sid=%s", r.RemoteAddr, sidHex)
 
 	sess := m.getSession(sid)
 	if sess == nil {
 		http.Error(w, "unknown sid", http.StatusNotFound)
+		m.logger.Printf("[http] send unknown sid remote=%s sid=%s", r.RemoteAddr, sidHex)
 		return
 	}
 
@@ -188,17 +199,27 @@ func (m *HTTPSessionManager) handleSend(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		m.deleteSession(sid)
 		http.Error(w, "session closed", http.StatusGone)
+		m.logger.Printf("[http] send read body failed remote=%s sid=%s err=%v", r.RemoteAddr, sidHex, err)
 		return
 	}
 	if int64(len(body)) > m.sendMax {
 		http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
+		m.logger.Printf("[http] send payload too large remote=%s sid=%s bytes=%d max=%d", r.RemoteAddr, sidHex, len(body), m.sendMax)
 		return
 	}
 	if _, err := sess.clientNC.Write(body); err != nil {
+		if errors.Is(err, errBufferFull) {
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, "receiver is slow; retry later", http.StatusTooManyRequests)
+			m.logger.Printf("[http] send backpressure remote=%s sid=%s bytes=%d", r.RemoteAddr, sidHex, len(body))
+			return
+		}
 		m.deleteSession(sid)
 		http.Error(w, "session closed", http.StatusGone)
+		m.logger.Printf("[http] send write failed remote=%s sid=%s err=%v", r.RemoteAddr, sidHex, err)
 		return
 	}
+	m.logger.Printf("[http] send ok remote=%s sid=%s bytes=%d", r.RemoteAddr, sidHex, len(body))
 
 	m.touch(sid)
 	w.WriteHeader(http.StatusNoContent)
@@ -208,12 +229,16 @@ func (m *HTTPSessionManager) handleRecv(w http.ResponseWriter, r *http.Request) 
 	sid, ok := parseSID(r.URL.Query().Get("sid"))
 	if !ok {
 		http.Error(w, "bad sid", http.StatusBadRequest)
+		m.logger.Printf("[http] recv bad sid remote=%s sid=%q", r.RemoteAddr, r.URL.Query().Get("sid"))
 		return
 	}
+	sidHex := hex.EncodeToString(sid[:])
+	m.logger.Printf("[http] recv request remote=%s sid=%s", r.RemoteAddr, sidHex)
 
 	sess := m.getSession(sid)
 	if sess == nil {
 		http.Error(w, "unknown sid", http.StatusNotFound)
+		m.logger.Printf("[http] recv unknown sid remote=%s sid=%s", r.RemoteAddr, sidHex)
 		return
 	}
 
@@ -222,11 +247,13 @@ func (m *HTTPSessionManager) handleRecv(w http.ResponseWriter, r *http.Request) 
 		defer func() { sess.recvToken <- struct{}{} }()
 	default:
 		http.Error(w, "recv already active", http.StatusConflict)
+		m.logger.Printf("[http] recv conflict remote=%s sid=%s", r.RemoteAddr, sidHex)
 		return
 	}
 
 	if err := sess.clientNC.SetReadDeadline(time.Now().Add(m.recvTimeout)); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
+		m.logger.Printf("[http] recv set deadline failed remote=%s sid=%s err=%v", r.RemoteAddr, sidHex, err)
 		return
 	}
 	defer sess.clientNC.SetReadDeadline(time.Time{})
@@ -236,6 +263,7 @@ func (m *HTTPSessionManager) handleRecv(w http.ResponseWriter, r *http.Request) 
 	fl, _ := w.(http.Flusher)
 
 	buf := make([]byte, 32*1024)
+	totalBytes := 0
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -246,23 +274,28 @@ func (m *HTTPSessionManager) handleRecv(w http.ResponseWriter, r *http.Request) 
 		n, err := sess.clientNC.Read(buf)
 		if n > 0 {
 			if _, werr := w.Write(buf[:n]); werr != nil {
+				m.logger.Printf("[http] recv client write aborted remote=%s sid=%s total=%d err=%v", r.RemoteAddr, sidHex, totalBytes, werr)
 				return
 			}
 			if fl != nil {
 				fl.Flush()
 			}
 			m.touch(sid)
+			totalBytes += n
+			m.logger.Printf("[http] recv chunk remote=%s sid=%s bytes=%d total=%d", r.RemoteAddr, sidHex, n, totalBytes)
 		}
 		if err != nil {
 			var ne net.Error
 			if errors.As(err, &ne) && ne.Timeout() {
+				m.logger.Printf("[http] recv timeout remote=%s sid=%s total=%d timeout=%s", r.RemoteAddr, sidHex, totalBytes, m.recvTimeout)
 				return
 			}
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) {
 				m.deleteSession(sid)
+				m.logger.Printf("[http] recv session closed remote=%s sid=%s total=%d", r.RemoteAddr, sidHex, totalBytes)
 				return
 			}
-			m.logger.Printf("[http] recv sid=%s read error: %v", hex.EncodeToString(sid[:]), err)
+			m.logger.Printf("[http] recv read error remote=%s sid=%s total=%d err=%v", r.RemoteAddr, sidHex, totalBytes, err)
 			return
 		}
 	}
@@ -281,6 +314,7 @@ func (m *HTTPSessionManager) deleteSession(id [16]byte) {
 	delete(m.sessions, id)
 	m.mu.Unlock()
 	if s != nil {
+		m.logger.Printf("[http] delete-session sid=%s", hex.EncodeToString(id[:]))
 		_ = s.clientNC.Close()
 		_ = s.serverNC.Close()
 	}
@@ -305,21 +339,38 @@ func (m *HTTPSessionManager) cleanupLoop(ctx context.Context) {
 		case <-t.C:
 		}
 
-		var toClose [][16]byte
 		now := time.Now()
-
-		m.mu.Lock()
-		for id, s := range m.sessions {
-			if now.Sub(s.lastUsed) > m.ttl {
-				toClose = append(toClose, id)
+		for id := range m.snapshotSessionIDs() {
+			if m.deleteSessionIfExpired(id, now) {
+				m.logger.Printf("[http] ttl-expired sid=%s ttl=%s", hex.EncodeToString(id[:]), m.ttl)
 			}
 		}
-		m.mu.Unlock()
-
-		for _, id := range toClose {
-			m.deleteSession(id)
-		}
 	}
+}
+
+func (m *HTTPSessionManager) snapshotSessionIDs() map[[16]byte]struct{} {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ids := make(map[[16]byte]struct{}, len(m.sessions))
+	for id := range m.sessions {
+		ids[id] = struct{}{}
+	}
+	return ids
+}
+
+func (m *HTTPSessionManager) deleteSessionIfExpired(id [16]byte, now time.Time) bool {
+	m.mu.Lock()
+	s := m.sessions[id]
+	if s == nil || now.Sub(s.lastUsed) <= m.ttl {
+		m.mu.Unlock()
+		return false
+	}
+	delete(m.sessions, id)
+	m.mu.Unlock()
+
+	_ = s.clientNC.Close()
+	_ = s.serverNC.Close()
+	return true
 }
 
 func parseSID(hex32 string) ([16]byte, bool) {

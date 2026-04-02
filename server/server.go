@@ -22,6 +22,8 @@ import (
 	"log"
 	"net"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/SecureGroupTP/sgtp_server/protocol"
 	"github.com/SecureGroupTP/sgtp_server/userdir"
@@ -96,22 +98,33 @@ type conn struct {
 	roomID  [16]byte
 	netConn net.Conn
 
+	logger *log.Logger
+	connID string
+
 	sendCh chan []byte
+
+	sendTimeout time.Duration
 
 	closeOnce sync.Once
 	closed    chan struct{}
 }
 
-func newConn(uuid, roomID [16]byte, nc net.Conn, queue int) *conn {
+func newConn(uuid, roomID [16]byte, nc net.Conn, queue int, sendTimeout time.Duration, logger *log.Logger, connID string) *conn {
 	if queue <= 0 {
 		queue = 64
 	}
+	if sendTimeout <= 0 {
+		sendTimeout = 250 * time.Millisecond
+	}
 	c := &conn{
-		uuid:    uuid,
-		roomID:  roomID,
-		netConn: nc,
-		sendCh:  make(chan []byte, queue),
-		closed:  make(chan struct{}),
+		uuid:        uuid,
+		roomID:      roomID,
+		netConn:     nc,
+		logger:      logger,
+		connID:      connID,
+		sendCh:      make(chan []byte, queue),
+		sendTimeout: sendTimeout,
+		closed:      make(chan struct{}),
 	}
 	go c.writeLoop()
 	return c
@@ -121,15 +134,44 @@ func (c *conn) send(raw []byte) {
 	b := append([]byte(nil), raw...)
 	select {
 	case c.sendCh <- b:
+		if c.logger != nil {
+			c.logger.Printf("[server] [%s] enqueue outbound bytes=%d queue_len=%d", c.connID, len(b), len(c.sendCh))
+		}
+		return
 	case <-c.closed:
+		if c.logger != nil {
+			c.logger.Printf("[server] [%s] drop outbound bytes=%d reason=connection_closed", c.connID, len(b))
+		}
+		return
 	default:
-		// Slow consumer: avoid unbounded buffering or blocking broadcasters.
+	}
+
+	timer := time.NewTimer(c.sendTimeout)
+	defer timer.Stop()
+
+	select {
+	case c.sendCh <- b:
+		if c.logger != nil {
+			c.logger.Printf("[server] [%s] enqueue outbound after wait bytes=%d queue_len=%d wait=%s", c.connID, len(b), len(c.sendCh), c.sendTimeout)
+		}
+	case <-c.closed:
+		if c.logger != nil {
+			c.logger.Printf("[server] [%s] drop outbound bytes=%d reason=connection_closed", c.connID, len(b))
+		}
+	case <-timer.C:
+		// Slow consumer persisted long enough to block broadcasters.
+		if c.logger != nil {
+			c.logger.Printf("[server] [%s] queue full for %s (cap=%d) closing slow consumer", c.connID, c.sendTimeout, cap(c.sendCh))
+		}
 		c.Close()
 	}
 }
 
 func (c *conn) Close() {
 	c.closeOnce.Do(func() {
+		if c.logger != nil {
+			c.logger.Printf("[server] [%s] conn close", c.connID)
+		}
 		close(c.closed)
 		_ = c.netConn.Close()
 	})
@@ -140,10 +182,19 @@ func (c *conn) writeLoop() {
 		select {
 		case b := <-c.sendCh:
 			if err := writeAll(c.netConn, b); err != nil {
+				if c.logger != nil {
+					c.logger.Printf("[server] [%s] write outbound failed bytes=%d err=%v", c.connID, len(b), err)
+				}
 				c.Close()
 				return
 			}
+			if c.logger != nil {
+				c.logger.Printf("[server] [%s] write outbound ok bytes=%d", c.connID, len(b))
+			}
 		case <-c.closed:
+			if c.logger != nil {
+				c.logger.Printf("[server] [%s] write loop exit: closed", c.connID)
+			}
 			return
 		}
 	}
@@ -169,7 +220,8 @@ type Server struct {
 	addr   string
 	logger *log.Logger
 
-	writeQueue int
+	writeQueue  int
+	sendTimeout time.Duration
 
 	// userdirSrv is optional. When non-nil, connections whose first 32 bytes
 	// are all zero are routed to the userdir handler instead of the relay.
@@ -196,13 +248,14 @@ func New(addr string, logger *log.Logger, ud *userdir.Server) *Server {
 		logger = log.Default()
 	}
 	return &Server{
-		addr:       addr,
-		logger:     logger,
-		writeQueue: 64,
-		userdirSrv: ud,
-		rooms:      make(map[[16]byte]*room),
-		conns:      make(map[*conn]struct{}),
-		closing:    make(chan struct{}),
+		addr:        addr,
+		logger:      logger,
+		writeQueue:  64,
+		sendTimeout: 250 * time.Millisecond,
+		userdirSrv:  ud,
+		rooms:       make(map[[16]byte]*room),
+		conns:       make(map[*conn]struct{}),
+		closing:     make(chan struct{}),
 	}
 }
 
@@ -243,6 +296,15 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) || ctx.Err() != nil {
 				return nil
+			}
+			if isTemporaryAcceptError(err) {
+				s.logger.Printf("[server] transient accept error: %v", err)
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-time.After(100 * time.Millisecond):
+				}
+				continue
 			}
 			return fmt.Errorf("sgtp: accept: %w", err)
 		}
@@ -310,13 +372,17 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) trackConn(c *conn) {
 	s.mu.Lock()
 	s.conns[c] = struct{}{}
+	total := len(s.conns)
 	s.mu.Unlock()
+	s.logger.Printf("[server] [%s] tracked active=%d", c.connID, total)
 }
 
 func (s *Server) untrackConn(c *conn) {
 	s.mu.Lock()
 	delete(s.conns, c)
+	total := len(s.conns)
 	s.mu.Unlock()
+	s.logger.Printf("[server] [%s] untracked active=%d", c.connID, total)
 }
 
 func (s *Server) getOrCreateRoom(roomID [16]byte) *room {
@@ -333,6 +399,8 @@ func (s *Server) getOrCreateRoom(roomID [16]byte) *room {
 // handleConn manages one TCP connection for its lifetime.
 func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 	defer nc.Close()
+	done := make(chan struct{})
+	defer close(done)
 	remote := nc.RemoteAddr().String()
 	s.logger.Printf("[server] new connection from %s", remote)
 
@@ -342,6 +410,7 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 			_ = nc.Close()
 		case <-s.closing:
 			_ = nc.Close()
+		case <-done:
 		}
 	}()
 
@@ -353,6 +422,7 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 		s.logger.Printf("[server] %s: read routing bytes: %v", remote, err)
 		return
 	}
+	s.logger.Printf("[server] %s: routing prefix read (32 bytes)", remote)
 
 	if isAllZero(first32) {
 		if s.userdirSrv != nil {
@@ -396,6 +466,7 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 	intentRaw := append(append([]byte(nil), hdrBuf...), tail...)
 
 	s.logger.Printf("[server] intent from uuid=%x room=%x", senderID[:4], roomID[:4])
+	connID := fmt.Sprintf("%s uuid=%x room=%x", remote, senderID[:4], roomID[:4])
 
 	// ── Register client in room ──────────────────────────────────────────────
 	r := s.getOrCreateRoom(roomID)
@@ -404,7 +475,7 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 	r.broadcast(senderID, intentRaw)
 	s.logger.Printf("[server] intent broadcast to %d existing members", r.count())
 
-	cn := newConn(senderID, roomID, nc, s.writeQueue)
+	cn := newConn(senderID, roomID, nc, s.writeQueue, s.sendTimeout, s.logger, connID)
 	s.trackConn(cn)
 	defer func() {
 		cn.Close()
@@ -438,7 +509,9 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 
 		raw, fhdr, err := readRawFrame(nc)
 		if err != nil {
-			if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
+			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
+				s.logger.Printf("[server] [%s] read loop closed: %v", connID, err)
+			} else {
 				s.logger.Printf("[server] uuid=%x read error: %v", senderID[:4], err)
 			}
 			return
@@ -453,6 +526,19 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 			r.unicast(fhdr.ReceiverUUID, raw)
 		}
 	}
+}
+
+func isTemporaryAcceptError(err error) bool {
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Temporary() {
+		return true
+	}
+	return errors.Is(err, syscall.ECONNABORTED) ||
+		errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.EMFILE) ||
+		errors.Is(err, syscall.ENFILE) ||
+		errors.Is(err, syscall.ENOBUFS) ||
+		errors.Is(err, syscall.ENOMEM)
 }
 
 // isAllZero reports whether every byte in b is 0x00.

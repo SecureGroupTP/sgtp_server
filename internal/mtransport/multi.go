@@ -76,7 +76,9 @@ func (m *MultiServer) Start(ctx context.Context) error {
 	discoveryPayload := make([]byte, len(discoveryResp))
 	copy(discoveryPayload, discoveryResp[:])
 	discoveryHandler := newHTTPDiscoveryHandler(discoveryPayload, discoveryPorts)
+	discoveryHandler.logger = m.Logger
 	healthHandler := func(w http.ResponseWriter, r *http.Request) {
+		m.Logger.Printf("[http] healthz method=%s remote=%s", r.Method, r.RemoteAddr)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
 	}
@@ -278,16 +280,20 @@ func (m *MultiServer) serveTCP(ctx context.Context, ln net.Listener, discoveryRe
 			continue // BUG FIX: was 'return' — stopped accepting on transient errors
 		}
 		go func(c net.Conn) {
+			remote := c.RemoteAddr().String()
+			m.Logger.Printf("[tcp] accepted remote=%s", remote)
 			// Send discovery bytes first so clients can detect transport options
 			// without a dedicated discovery port.
 			_ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
 			if err := writeAll(c, discoveryResp); err != nil {
-				m.Logger.Printf("[tcp] write discovery header: %v", err)
+				m.Logger.Printf("[tcp] remote=%s discovery write failed: %v", remote, err)
 				_ = c.Close()
 				return
 			}
+			m.Logger.Printf("[tcp] remote=%s discovery bytes sent=%d", remote, len(discoveryResp))
 			_ = c.SetWriteDeadline(time.Time{})
 			m.Relay.ServeConn(ctx, c)
+			m.Logger.Printf("[tcp] remote=%s relay ServeConn finished", remote)
 		}(nc)
 	}
 }
@@ -304,6 +310,7 @@ func writeAll(w net.Conn, b []byte) error {
 }
 
 type httpDiscoveryHandler struct {
+	logger        *log.Logger
 	resp          []byte
 	ports         Ports
 	flags         int
@@ -315,6 +322,7 @@ func newHTTPDiscoveryHandler(resp []byte, ports Ports) *httpDiscoveryHandler {
 	dup := make([]byte, len(resp))
 	copy(dup, resp)
 	return &httpDiscoveryHandler{
+		logger:        log.Default(),
 		resp:          dup,
 		ports:         ports,
 		flags:         int(resp[0]),
@@ -324,6 +332,9 @@ func newHTTPDiscoveryHandler(resp []byte, ports Ports) *httpDiscoveryHandler {
 }
 
 func (h *httpDiscoveryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h.logger != nil {
+		h.logger.Printf("[http] discovery request method=%s remote=%s format=%q", r.Method, r.RemoteAddr, r.URL.Query().Get("format"))
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -336,6 +347,9 @@ func (h *httpDiscoveryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		if r.Method == http.MethodGet {
 			_, _ = w.Write(h.resp)
 		}
+		if h.logger != nil {
+			h.logger.Printf("[http] discovery response remote=%s kind=raw bytes=%d", r.RemoteAddr, len(h.resp))
+		}
 		return
 	}
 
@@ -343,10 +357,16 @@ func (h *httpDiscoveryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	if r.Method == http.MethodHead {
+		if h.logger != nil {
+			h.logger.Printf("[http] discovery response remote=%s kind=json head=true", r.RemoteAddr)
+		}
 		return
 	}
 
 	_ = json.NewEncoder(w).Encode(h.makePayload())
+	if h.logger != nil {
+		h.logger.Printf("[http] discovery response remote=%s kind=json", r.RemoteAddr)
+	}
 }
 
 func (h *httpDiscoveryHandler) makePayload() discoveryResponseJSON {
