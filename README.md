@@ -43,11 +43,15 @@ Legacy mode (default; no discovery):
 - `SERVER_ADDR` — optional listen address (e.g. `0.0.0.0:7777`)
 - `SHUTDOWN_TIMEOUT` — graceful shutdown timeout (default: `10s`)
 
-Multi-transport mode (discovery + per-transport ports):
-
-- Set `DISCOVERY_PORT` to a non-zero port to enable discovery on plain TCP.
-  - When enabled, the server does **not** use `SERVER_ADDR` / `SERVER_PORT` for serving discovery (it uses `DISCOVERY_PORT`).
-  - For convenience, `TCP_PORT` defaults to `SERVER_PORT` when `TCP_PORT` is unset.
+- Multi-transport mode starts as soon as any of `TCP_PORT`, `TCP_TLS_PORT`, `HTTP_PORT`,
+- `HTTP_TLS_PORT`, `WS_PORT`, or `WS_TLS_PORT` is non-zero.
+- The HTTP discovery handler lives on every configured HTTP/WS listener. `GET
+- /sgtp/discovery` (and `HEAD /sgtp/discovery`) returns JSON describing the enabled transports
+- plus the base64/hex version of the legacy 25-byte payload; append `?format=raw` or
+- `?format=binary` to receive the raw blob directly.
+- The server also sends the 25-byte discovery header at the start of each raw TCP connection
+- so legacy clients can continue to read the capabilities payload before the SGTP handshake.
+- For convenience, `TCP_PORT` defaults to `SERVER_PORT` when `TCP_PORT` is unset.
 - Per-transport ports (set to `0` to disable):
   - `TCP_PORT`
   - `TCP_TLS_PORT` — TLS-encrypted SGTP (requires `TLS_CERT_FILE` + `TLS_KEY_FILE`)

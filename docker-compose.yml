@@ -10,7 +10,6 @@ services:
       SERVER_PORT: "${CHAT_TCP_PORT}"
       # Multi-transport (enable discovery by setting a non-zero port)
       BIND_HOST: "${BIND_HOST}"
-      DISCOVERY_PORT: "${CHAT_DISCOVERY_PORT}"
       TCP_PORT: "${CHAT_TCP_PORT}"
       TCP_TLS_PORT: "${CHAT_TCP_TLS_PORT}"
       HTTP_PORT: "${CHAT_HTTP_PORT}"
@@ -33,7 +32,6 @@ services:
       CLEANUP_INTERVAL: "5m"
     ports:
       - "0.0.0.0:${CHAT_TCP_PORT}:${CHAT_TCP_PORT}"
-      - "0.0.0.0:${CHAT_DISCOVERY_PORT}:${CHAT_DISCOVERY_PORT}"
       - "0.0.0.0:${CHAT_HTTP_PORT}:${CHAT_HTTP_PORT}"
       - "0.0.0.0:${CHAT_WS_PORT}:${CHAT_WS_PORT}"
     volumes:
@@ -52,7 +50,6 @@ services:
       SERVER_PORT: "${VOICE_TCP_PORT}"
       # Multi-transport (enable discovery by setting a non-zero port)
       BIND_HOST: "${BIND_HOST}"
-      DISCOVERY_PORT: "${VOICE_DISCOVERY_PORT}"
       TCP_PORT: "${VOICE_TCP_PORT}"
       TCP_TLS_PORT: "${VOICE_TCP_TLS_PORT}"
       HTTP_PORT: "${VOICE_HTTP_PORT}"
@@ -75,7 +72,6 @@ services:
       CLEANUP_INTERVAL: "5m"
     ports:
       - "0.0.0.0:${VOICE_TCP_PORT}:${VOICE_TCP_PORT}"
-      - "0.0.0.0:${VOICE_DISCOVERY_PORT}:${VOICE_DISCOVERY_PORT}"
       - "0.0.0.0:${VOICE_HTTP_PORT}:${VOICE_HTTP_PORT}"
       - "0.0.0.0:${VOICE_WS_PORT}:${VOICE_WS_PORT}"
     volumes:

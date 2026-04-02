@@ -3,6 +3,9 @@ package mtransport
 import (
 	"context"
 	"crypto/tls"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -21,8 +24,7 @@ type MultiServer struct {
 	BindHost  string
 	TLSConfig *tls.Config
 
-	DiscoveryPort uint16
-	Ports         Ports
+	Ports Ports
 
 	HTTPRecvTimeout  time.Duration
 	HTTPSendMax      int64
@@ -30,15 +32,14 @@ type MultiServer struct {
 	HTTPSessionTTL   time.Duration
 	HTTPCleanupEvery time.Duration
 
-	mu          sync.Mutex
-	discoveryLn net.Listener
-	tcpLn       net.Listener
-	tlsTCPLn    net.Listener
-	httpLns     map[uint16]net.Listener
-	httpSrvs    map[uint16]*http.Server
-	tlsLns      map[uint16]net.Listener
-	tlsSrvs     map[uint16]*http.Server
-	httpSess    *HTTPSessionManager
+	mu       sync.Mutex
+	tcpLn    net.Listener
+	tlsTCPLn net.Listener
+	httpLns  map[uint16]net.Listener
+	httpSrvs map[uint16]*http.Server
+	tlsLns   map[uint16]net.Listener
+	tlsSrvs  map[uint16]*http.Server
+	httpSess *HTTPSessionManager
 }
 
 func (m *MultiServer) Start(ctx context.Context) error {
@@ -60,21 +61,16 @@ func (m *MultiServer) Start(ctx context.Context) error {
 	m.tlsLns = make(map[uint16]net.Listener)
 	m.tlsSrvs = make(map[uint16]*http.Server)
 
-	// Pre-compute the 25-byte discovery payload once; it is sent on both the
-	// dedicated discovery port (if configured) AND the plain TCP relay port.
-	// This lets clients use the TCP relay port for "Fetch server options"
-	// without needing to know a separate discovery port.
+	// Pre-compute the 25-byte discovery payload once; it is used for both the
+	// TCP relay handshake and the HTTP discovery responses so clients can fetch
+	// transport options without a separate discovery port.
 	discoveryResp := m.Ports.DiscoveryResponse()
-
-	// ── Discovery ───────────────────────────────────────────────────────────
-	if m.DiscoveryPort != 0 {
-		ln, err := net.Listen("tcp", m.listenAddr(m.DiscoveryPort))
-		if err != nil {
-			return fmt.Errorf("discovery listen: %w", err)
-		}
-		m.discoveryLn = ln
-		m.Logger.Printf("[discovery] listening on %s", ln.Addr().String())
-		go m.serveDiscovery(ctx, ln, discoveryResp[:])
+	discoveryPayload := make([]byte, len(discoveryResp))
+	copy(discoveryPayload, discoveryResp[:])
+	discoveryHandler := newHTTPDiscoveryHandler(discoveryPayload, m.Ports)
+	healthHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok\n"))
 	}
 
 	// ── TCP ─────────────────────────────────────────────────────────────────
@@ -91,10 +87,9 @@ func (m *MultiServer) Start(ctx context.Context) error {
 	// ── HTTP / WS (plain + TLS) ──────────────────────────────────────────────
 	newMux := func() *http.ServeMux {
 		mux := http.NewServeMux()
-		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("ok\n"))
-		})
+		mux.HandleFunc("GET /healthz", healthHandler)
+		mux.HandleFunc("GET /sgtp/discovery", discoveryHandler.ServeHTTP)
+		mux.HandleFunc("HEAD /sgtp/discovery", discoveryHandler.ServeHTTP)
 		return mux
 	}
 
@@ -199,7 +194,6 @@ func (m *MultiServer) Start(ctx context.Context) error {
 
 func (m *MultiServer) Shutdown(ctx context.Context) error {
 	m.mu.Lock()
-	discoveryLn := m.discoveryLn
 	tcpLn := m.tcpLn
 	tlsTCPLn := m.tlsTCPLn
 	httpLns := m.httpLns
@@ -207,7 +201,6 @@ func (m *MultiServer) Shutdown(ctx context.Context) error {
 	tlsLns := m.tlsLns
 	tlsSrvs := m.tlsSrvs
 	httpSess := m.httpSess
-	m.discoveryLn = nil
 	m.tcpLn = nil
 	m.tlsTCPLn = nil
 	m.httpLns = nil
@@ -217,9 +210,6 @@ func (m *MultiServer) Shutdown(ctx context.Context) error {
 	m.httpSess = nil
 	m.mu.Unlock()
 
-	if discoveryLn != nil {
-		_ = discoveryLn.Close()
-	}
 	if tcpLn != nil {
 		_ = tcpLn.Close()
 	}
@@ -250,24 +240,6 @@ func (m *MultiServer) listenAddr(port uint16) string {
 		return fmt.Sprintf(":%d", port)
 	}
 	return fmt.Sprintf("%s:%d", host, port)
-}
-
-func (m *MultiServer) serveDiscovery(ctx context.Context, ln net.Listener, resp []byte) {
-	for {
-		nc, err := ln.Accept()
-		if err != nil {
-			if errors.Is(err, net.ErrClosed) || ctx.Err() != nil {
-				return
-			}
-			m.Logger.Printf("[discovery] accept error: %v", err)
-			continue // BUG FIX: was 'return' — caused the loop to stop on any transient error
-		}
-		go func(c net.Conn) {
-			_ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
-			_ = writeAll(c, resp)
-			_ = c.Close()
-		}(nc)
-	}
 }
 
 // serveTCP accepts raw TCP connections and sends the 25-byte discovery header
@@ -312,4 +284,106 @@ func writeAll(w net.Conn, b []byte) error {
 		b = b[n:]
 	}
 	return nil
+}
+
+type httpDiscoveryHandler struct {
+	resp          []byte
+	ports         Ports
+	flags         int
+	payloadHex    string
+	payloadBase64 string
+}
+
+func newHTTPDiscoveryHandler(resp []byte, ports Ports) *httpDiscoveryHandler {
+	dup := make([]byte, len(resp))
+	copy(dup, resp)
+	return &httpDiscoveryHandler{
+		resp:          dup,
+		ports:         ports,
+		flags:         int(resp[0]),
+		payloadHex:    hex.EncodeToString(resp),
+		payloadBase64: base64.StdEncoding.EncodeToString(resp),
+	}
+}
+
+func (h *httpDiscoveryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	format := r.URL.Query().Get("format")
+	if format == "raw" || format == "binary" {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.WriteHeader(http.StatusOK)
+		if r.Method == http.MethodGet {
+			_, _ = w.Write(h.resp)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	if r.Method == http.MethodHead {
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(h.makePayload())
+}
+
+func (h *httpDiscoveryHandler) makePayload() discoveryResponseJSON {
+	return discoveryResponseJSON{
+		Flags: h.flags,
+		Ports: discoveryPortsJSON{
+			TCP:     h.ports.TCP,
+			TCPTLS:  h.ports.TCPTLS,
+			HTTP:    h.ports.HTTP,
+			HTTPTLS: h.ports.HTTPTLS,
+			WS:      h.ports.WS,
+			WSTLS:   h.ports.WSTLS,
+		},
+		Enabled: discoveryEnabledJSON{
+			TCP:     h.ports.TCP != 0,
+			TCPTLS:  h.ports.TCPTLS != 0,
+			HTTP:    h.ports.HTTP != 0,
+			HTTPTLS: h.ports.HTTPTLS != 0,
+			WS:      h.ports.WS != 0,
+			WSTLS:   h.ports.WSTLS != 0,
+		},
+		Payload: discoveryPayloadJSON{
+			Base64: h.payloadBase64,
+			Hex:    h.payloadHex,
+		},
+	}
+}
+
+type discoveryResponseJSON struct {
+	Flags   int                  `json:"flags"`
+	Ports   discoveryPortsJSON   `json:"ports"`
+	Enabled discoveryEnabledJSON `json:"enabled"`
+	Payload discoveryPayloadJSON `json:"payload"`
+}
+
+type discoveryPortsJSON struct {
+	TCP     uint16 `json:"tcp"`
+	TCPTLS  uint16 `json:"tcp_tls"`
+	HTTP    uint16 `json:"http"`
+	HTTPTLS uint16 `json:"http_tls"`
+	WS      uint16 `json:"ws"`
+	WSTLS   uint16 `json:"ws_tls"`
+}
+
+type discoveryEnabledJSON struct {
+	TCP     bool `json:"tcp"`
+	TCPTLS  bool `json:"tcp_tls"`
+	HTTP    bool `json:"http"`
+	HTTPTLS bool `json:"http_tls"`
+	WS      bool `json:"ws"`
+	WSTLS   bool `json:"ws_tls"`
+}
+
+type discoveryPayloadJSON struct {
+	Base64 string `json:"base64"`
+	Hex    string `json:"hex"`
 }

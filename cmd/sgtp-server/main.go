@@ -32,13 +32,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// If DISCOVERY_PORT is set, run in multi-transport mode. Otherwise keep the
-	// legacy behavior (single raw TCP listener on SERVER_ADDR/SERVER_PORT).
-	discoveryPort, err := portFromEnvAllowZero("DISCOVERY_PORT", 0)
-	if err != nil {
-		log.Fatalf("[server] invalid env: %v", err)
-	}
-
 	// ── Optional userdir (enabled when PG_DSN is set) ────────────────────────
 	var ud *userdir.Server
 	if dsn := os.Getenv("PG_DSN"); dsn != "" {
@@ -85,7 +78,13 @@ func main() {
 		logger.Printf("[server] userdir enabled (inline mux on same port)")
 	}
 
-	if discoveryPort == 0 {
+	ports, err := multiPortsFromEnv()
+	if err != nil {
+		logger.Fatalf("[server] invalid env: %v", err)
+	}
+	useMulti := ports.AnyEnabled()
+
+	if !useMulti {
 		addr, err := listenAddrFromEnv()
 		if err != nil {
 			log.Fatalf("[server] invalid env: %v", err)
@@ -106,10 +105,6 @@ func main() {
 		return
 	}
 
-	ports, err := multiPortsFromEnv()
-	if err != nil {
-		logger.Fatalf("[server] invalid env: %v", err)
-	}
 	tlsCertFile := os.Getenv("TLS_CERT_FILE")
 	tlsKeyFile := os.Getenv("TLS_KEY_FILE")
 	tlsConfig, err := newTLSConfig(tlsCertFile, tlsKeyFile)
@@ -147,7 +142,6 @@ func main() {
 		Relay:            relay,
 		BindHost:         os.Getenv("BIND_HOST"),
 		TLSConfig:        tlsConfig,
-		DiscoveryPort:    discoveryPort,
 		Ports:            ports,
 		HTTPRecvTimeout:  httpRecvTimeout,
 		HTTPSendMax:      httpSendMax,
