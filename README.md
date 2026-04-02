@@ -59,6 +59,7 @@ Multi-transport mode (discovery + per-transport ports):
   - `TLS_CERT_FILE`
   - `TLS_KEY_FILE`
 HTTP and WS handlers share their muxes, so you can point `HTTP_PORT`/`WS_PORT` and the TLS equivalents at the same number to serve both protocols from a single listener.
+  - `docker-compose` по умолчанию монтирует каталог `./certs` в контейнер как `/certs`, а переменные `TLS_CERT_FILE`/`TLS_KEY_FILE` в `.env` ссылаются на `/certs/certificate.crt` и `/certs/private.key`. Если ваши файлы имеют другие имена, поправьте переменные и гарантируйте, что папка доступна внутри контейнера.
 
 - Optional bind host:
   - `BIND_HOST` — e.g. `0.0.0.0` (default: empty = all interfaces)
