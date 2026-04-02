@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
 	"os"
@@ -109,6 +110,15 @@ func main() {
 	if err != nil {
 		logger.Fatalf("[server] invalid env: %v", err)
 	}
+	tlsCertFile := os.Getenv("TLS_CERT_FILE")
+	tlsKeyFile := os.Getenv("TLS_KEY_FILE")
+	tlsConfig, err := newTLSConfig(tlsCertFile, tlsKeyFile)
+	if err != nil {
+		logger.Fatalf("[server] invalid TLS config: %v", err)
+	}
+	if tlsConfig != nil {
+		logger.Printf("[server] TLS enabled (cert=%s key=%s)", tlsCertFile, tlsKeyFile)
+	}
 
 	httpRecvTimeout, err := durationFromEnv("HTTP_RECV_TIMEOUT", 60*time.Second)
 	if err != nil {
@@ -136,6 +146,7 @@ func main() {
 		Logger:           logger,
 		Relay:            relay,
 		BindHost:         os.Getenv("BIND_HOST"),
+		TLSConfig:        tlsConfig,
 		DiscoveryPort:    discoveryPort,
 		Ports:            ports,
 		HTTPRecvTimeout:  httpRecvTimeout,
@@ -216,6 +227,20 @@ func durationFromEnv(key string, def time.Duration) (time.Duration, error) {
 		return def, nil
 	}
 	return time.ParseDuration(v)
+}
+
+func newTLSConfig(certFile, keyFile string) (*tls.Config, error) {
+	if certFile == "" && keyFile == "" {
+		return nil, nil
+	}
+	if certFile == "" || keyFile == "" {
+		return nil, fmt.Errorf("TLS_CERT_FILE and TLS_KEY_FILE must both be set")
+	}
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return nil, fmt.Errorf("load TLS key pair: %w", err)
+	}
+	return &tls.Config{Certificates: []tls.Certificate{cert}}, nil
 }
 
 func uint32FromEnv(key string, def uint32) (uint32, error) {

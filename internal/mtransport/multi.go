@@ -2,6 +2,7 @@ package mtransport
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log"
@@ -13,13 +14,12 @@ import (
 	"github.com/SecureGroupTP/sgtp_server/server"
 )
 
-const tlsEnabled = false
-
 type MultiServer struct {
 	Logger *log.Logger
 	Relay  *server.Server
 
-	BindHost string
+	BindHost  string
+	TLSConfig *tls.Config
 
 	DiscoveryPort uint16
 	Ports         Ports
@@ -33,8 +33,11 @@ type MultiServer struct {
 	mu          sync.Mutex
 	discoveryLn net.Listener
 	tcpLn       net.Listener
+	tlsTCPLn    net.Listener
 	httpLns     map[uint16]net.Listener
 	httpSrvs    map[uint16]*http.Server
+	tlsLns      map[uint16]net.Listener
+	tlsSrvs     map[uint16]*http.Server
 	httpSess    *HTTPSessionManager
 }
 
@@ -48,12 +51,14 @@ func (m *MultiServer) Start(ctx context.Context) error {
 	if !m.Ports.AnyEnabled() {
 		return fmt.Errorf("mtransport: no transports enabled")
 	}
-	if !tlsEnabled && (m.Ports.TCPTLS != 0 || m.Ports.HTTPTLS != 0 || m.Ports.WSTLS != 0) {
-		return fmt.Errorf("mtransport: TLS ports are set but TLS is disabled at build time")
+	if (m.Ports.TCPTLS != 0 || m.Ports.HTTPTLS != 0 || m.Ports.WSTLS != 0) && m.TLSConfig == nil {
+		return fmt.Errorf("mtransport: TLS ports are set but TLS config is nil")
 	}
 
 	m.httpLns = make(map[uint16]net.Listener)
 	m.httpSrvs = make(map[uint16]*http.Server)
+	m.tlsLns = make(map[uint16]net.Listener)
+	m.tlsSrvs = make(map[uint16]*http.Server)
 
 	// Pre-compute the 25-byte discovery payload once; it is sent on both the
 	// dedicated discovery port (if configured) AND the plain TCP relay port.
@@ -83,22 +88,36 @@ func (m *MultiServer) Start(ctx context.Context) error {
 		go m.serveTCP(ctx, ln, discoveryResp[:])
 	}
 
-	// ── HTTP / WS (plain) ───────────────────────────────────────────────────
+	// ── HTTP / WS (plain + TLS) ──────────────────────────────────────────────
+	newMux := func() *http.ServeMux {
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok\n"))
+		})
+		return mux
+	}
+
 	muxByPort := map[uint16]*http.ServeMux{}
+	tlsMuxByPort := map[uint16]*http.ServeMux{}
 	getMux := func(port uint16) *http.ServeMux {
 		mux := muxByPort[port]
 		if mux == nil {
-			mux = http.NewServeMux()
+			mux = newMux()
 			muxByPort[port] = mux
-			mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte("ok\n"))
-			})
+		}
+		return mux
+	}
+	getTLSMux := func(port uint16) *http.ServeMux {
+		mux := tlsMuxByPort[port]
+		if mux == nil {
+			mux = newMux()
+			tlsMuxByPort[port] = mux
 		}
 		return mux
 	}
 
-	if m.Ports.HTTP != 0 {
+	if m.Ports.HTTP != 0 || m.Ports.HTTPTLS != 0 {
 		m.httpSess = NewHTTPSessionManager(HTTPSessionConfig{
 			Logger:       m.Logger,
 			Relay:        m.Relay,
@@ -109,7 +128,12 @@ func (m *MultiServer) Start(ctx context.Context) error {
 			TTL:          m.HTTPSessionTTL,
 			CleanupEvery: m.HTTPCleanupEvery,
 		})
-		m.httpSess.Register(getMux(m.Ports.HTTP))
+		if m.Ports.HTTP != 0 {
+			m.httpSess.Register(getMux(m.Ports.HTTP))
+		}
+		if m.Ports.HTTPTLS != 0 {
+			m.httpSess.Register(getTLSMux(m.Ports.HTTPTLS))
+		}
 		m.httpSess.Start(ctx)
 	}
 
@@ -119,6 +143,13 @@ func (m *MultiServer) Start(ctx context.Context) error {
 			Relay:  m.Relay,
 			Ctx:    ctx,
 		}.Register(getMux(m.Ports.WS))
+	}
+	if m.Ports.WSTLS != 0 {
+		WSHandler{
+			Logger: m.Logger,
+			Relay:  m.Relay,
+			Ctx:    ctx,
+		}.Register(getTLSMux(m.Ports.WSTLS))
 	}
 
 	for port, mux := range muxByPort {
@@ -142,6 +173,27 @@ func (m *MultiServer) Start(ctx context.Context) error {
 		}(port)
 	}
 
+	for port, mux := range tlsMuxByPort {
+		ln, err := tls.Listen("tcp", m.listenAddr(port), m.TLSConfig)
+		if err != nil {
+			return fmt.Errorf("http/tls listen (%d): %w", port, err)
+		}
+		srv := &http.Server{
+			Handler:           mux,
+			ReadHeaderTimeout: 5 * time.Second,
+			IdleTimeout:       120 * time.Second,
+		}
+		m.tlsLns[port] = ln
+		m.tlsSrvs[port] = srv
+		m.Logger.Printf("[http tls] listening on %s", ln.Addr().String())
+		go func(port uint16) {
+			err := srv.Serve(ln)
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				m.Logger.Printf("[http tls] port=%d Serve error: %v", port, err)
+			}
+		}(port)
+	}
+
 	return nil
 }
 
@@ -149,13 +201,19 @@ func (m *MultiServer) Shutdown(ctx context.Context) error {
 	m.mu.Lock()
 	discoveryLn := m.discoveryLn
 	tcpLn := m.tcpLn
+	tlsTCPLn := m.tlsTCPLn
 	httpLns := m.httpLns
 	httpSrvs := m.httpSrvs
+	tlsLns := m.tlsLns
+	tlsSrvs := m.tlsSrvs
 	httpSess := m.httpSess
 	m.discoveryLn = nil
 	m.tcpLn = nil
+	m.tlsTCPLn = nil
 	m.httpLns = nil
 	m.httpSrvs = nil
+	m.tlsLns = nil
+	m.tlsSrvs = nil
 	m.httpSess = nil
 	m.mu.Unlock()
 
@@ -165,10 +223,19 @@ func (m *MultiServer) Shutdown(ctx context.Context) error {
 	if tcpLn != nil {
 		_ = tcpLn.Close()
 	}
+	if tlsTCPLn != nil {
+		_ = tlsTCPLn.Close()
+	}
 	for _, ln := range httpLns {
 		_ = ln.Close()
 	}
+	for _, ln := range tlsLns {
+		_ = ln.Close()
+	}
 	for _, srv := range httpSrvs {
+		_ = srv.Shutdown(ctx)
+	}
+	for _, srv := range tlsSrvs {
 		_ = srv.Shutdown(ctx)
 	}
 	if httpSess != nil {

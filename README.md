@@ -50,11 +50,16 @@ Multi-transport mode (discovery + per-transport ports):
   - For convenience, `TCP_PORT` defaults to `SERVER_PORT` when `TCP_PORT` is unset.
 - Per-transport ports (set to `0` to disable):
   - `TCP_PORT`
-  - `TCP_TLS_PORT` (TLS currently disabled at build time; must stay `0`)
+  - `TCP_TLS_PORT` — TLS-encrypted SGTP (requires `TLS_CERT_FILE` + `TLS_KEY_FILE`)
   - `HTTP_PORT`
-  - `HTTP_TLS_PORT` (TLS currently disabled at build time; must stay `0`)
+  - `HTTP_TLS_PORT` — HTTPS / WS upgrades; reuses the same mux as `HTTP_PORT`
   - `WS_PORT`
-  - `WS_TLS_PORT` (TLS currently disabled at build time; must stay `0`)
+  - `WS_TLS_PORT` — secure WebSocket port (can match `HTTP_TLS_PORT`)
+- TLS certificate/key (required when any TLS port is non-zero):
+  - `TLS_CERT_FILE`
+  - `TLS_KEY_FILE`
+HTTP and WS handlers share their muxes, so you can point `HTTP_PORT`/`WS_PORT` and the TLS equivalents at the same number to serve both protocols from a single listener.
+
 - Optional bind host:
   - `BIND_HOST` — e.g. `0.0.0.0` (default: empty = all interfaces)
 - HTTP transport tuning:
