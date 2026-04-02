@@ -82,6 +82,10 @@ func main() {
 	if err != nil {
 		logger.Fatalf("[server] invalid env: %v", err)
 	}
+	discoveryPorts, err := discoveryPortsFromEnv(ports)
+	if err != nil {
+		logger.Fatalf("[server] invalid env: %v", err)
+	}
 	useMulti := ports.AnyEnabled()
 
 	if !useMulti {
@@ -143,6 +147,7 @@ func main() {
 		BindHost:         os.Getenv("BIND_HOST"),
 		TLSConfig:        tlsConfig,
 		Ports:            ports,
+		DiscoveryPorts:   &discoveryPorts,
 		HTTPRecvTimeout:  httpRecvTimeout,
 		HTTPSendMax:      httpSendMax,
 		HTTPBufferBytes:  httpBuf,
@@ -213,6 +218,44 @@ func multiPortsFromEnv() (mtransport.Ports, error) {
 		WS:      wsPort,
 		WSTLS:   wsTLSPort,
 	}, nil
+}
+
+func discoveryPortsFromEnv(def mtransport.Ports) (mtransport.Ports, error) {
+	out := def
+	var err error
+
+	if out.TCP, err = portOverrideFromEnv("ADVERTISE_TCP_PORT", out.TCP); err != nil {
+		return mtransport.Ports{}, err
+	}
+	if out.TCPTLS, err = portOverrideFromEnv("ADVERTISE_TCP_TLS_PORT", out.TCPTLS); err != nil {
+		return mtransport.Ports{}, err
+	}
+	if out.HTTP, err = portOverrideFromEnv("ADVERTISE_HTTP_PORT", out.HTTP); err != nil {
+		return mtransport.Ports{}, err
+	}
+	if out.HTTPTLS, err = portOverrideFromEnv("ADVERTISE_HTTP_TLS_PORT", out.HTTPTLS); err != nil {
+		return mtransport.Ports{}, err
+	}
+	if out.WS, err = portOverrideFromEnv("ADVERTISE_WS_PORT", out.WS); err != nil {
+		return mtransport.Ports{}, err
+	}
+	if out.WSTLS, err = portOverrideFromEnv("ADVERTISE_WS_TLS_PORT", out.WSTLS); err != nil {
+		return mtransport.Ports{}, err
+	}
+
+	return out, nil
+}
+
+func portOverrideFromEnv(key string, current uint16) (uint16, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return current, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 || n > 65535 {
+		return 0, fmt.Errorf("%s must be 0..65535, got %q", key, v)
+	}
+	return uint16(n), nil
 }
 
 func durationFromEnv(key string, def time.Duration) (time.Duration, error) {

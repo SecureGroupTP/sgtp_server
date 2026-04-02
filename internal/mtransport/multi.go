@@ -24,7 +24,11 @@ type MultiServer struct {
 	BindHost  string
 	TLSConfig *tls.Config
 
+	// Ports are local listen ports.
 	Ports Ports
+	// DiscoveryPorts, when non-nil, are advertised in discovery payloads instead
+	// of local listen Ports. Useful behind reverse-proxy/NAT.
+	DiscoveryPorts *Ports
 
 	HTTPRecvTimeout  time.Duration
 	HTTPSendMax      int64
@@ -64,10 +68,14 @@ func (m *MultiServer) Start(ctx context.Context) error {
 	// Pre-compute the 25-byte discovery payload once; it is used for both the
 	// TCP relay handshake and the HTTP discovery responses so clients can fetch
 	// transport options without a separate discovery port.
-	discoveryResp := m.Ports.DiscoveryResponse()
+	discoveryPorts := m.Ports
+	if m.DiscoveryPorts != nil {
+		discoveryPorts = *m.DiscoveryPorts
+	}
+	discoveryResp := discoveryPorts.DiscoveryResponse()
 	discoveryPayload := make([]byte, len(discoveryResp))
 	copy(discoveryPayload, discoveryResp[:])
-	discoveryHandler := newHTTPDiscoveryHandler(discoveryPayload, m.Ports)
+	discoveryHandler := newHTTPDiscoveryHandler(discoveryPayload, discoveryPorts)
 	healthHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))

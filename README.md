@@ -59,6 +59,14 @@ Legacy mode (default; no discovery):
   - `HTTP_TLS_PORT` — HTTPS / WS upgrades; reuses the same mux as `HTTP_PORT`
   - `WS_PORT`
   - `WS_TLS_PORT` — secure WebSocket port (can match `HTTP_TLS_PORT`)
+- Optional discovery-only overrides (advertised to clients; listeners stay on `*_PORT`):
+  - `ADVERTISE_TCP_PORT`
+  - `ADVERTISE_TCP_TLS_PORT`
+  - `ADVERTISE_HTTP_PORT`
+  - `ADVERTISE_HTTP_TLS_PORT`
+  - `ADVERTISE_WS_PORT`
+  - `ADVERTISE_WS_TLS_PORT`
+  - Useful behind reverse-proxy/NAT (for example: listen on `HTTP_PORT=8080`, advertise `ADVERTISE_HTTP_TLS_PORT=443` and `ADVERTISE_WS_TLS_PORT=443`).
 - TLS certificate/key (required when any TLS port is non-zero):
   - `TLS_CERT_FILE`
   - `TLS_KEY_FILE`
