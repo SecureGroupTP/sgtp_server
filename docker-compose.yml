@@ -1,4 +1,32 @@
 services:
+  nginx:
+    container_name: sgtp_nginx
+    build:
+      context: .
+      dockerfile: deploy/nginx/Dockerfile
+    depends_on:
+      sgtp_chat:
+        condition: service_started
+    environment:
+      NGINX_SERVER_NAME: "${NGINX_SERVER_NAME}"
+      UPSTREAM_HOST: "sgtp_chat"
+      UPSTREAM_PORT: "${CHAT_HTTP_PORT}"
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+    volumes:
+      - "./certbot/www:/var/www/certbot"
+      - "./certbot/conf:/etc/letsencrypt"
+    restart: unless-stopped
+    init: true
+
+  certbot:
+    container_name: sgtp_certbot
+    image: certbot/certbot:latest
+    volumes:
+      - "./certbot/www:/var/www/certbot"
+      - "./certbot/conf:/etc/letsencrypt"
+
   sgtp_chat:
     container_name: sgtp_chat
     build: .
@@ -33,50 +61,9 @@ services:
     ports:
       - "0.0.0.0:${CHAT_TCP_PORT}:${CHAT_TCP_PORT}"
       - "0.0.0.0:${CHAT_TCP_TLS_PORT}:${CHAT_TCP_TLS_PORT}"
-      - "0.0.0.0:${CHAT_HTTP_PORT}:${CHAT_HTTP_PORT}"
-      - "0.0.0.0:${CHAT_HTTP_TLS_PORT}:${CHAT_HTTP_TLS_PORT}"
-      - "0.0.0.0:${CHAT_WS_PORT}:${CHAT_WS_PORT}"
-      - "0.0.0.0:${CHAT_WS_TLS_PORT}:${CHAT_WS_TLS_PORT}"
-    volumes:
-      - "./certs:/certs:ro"
-    restart: unless-stopped
-    init: true
-
-  sgtp_voice:
-    container_name: sgtp_voice
-    build: .
-    depends_on:
-      userdir_db:
-        condition: service_healthy
-    environment:
-      # Legacy (still set for compatibility / defaults)
-      SERVER_PORT: "${VOICE_TCP_PORT}"
-      # Multi-transport (enable discovery by setting a non-zero port)
-      BIND_HOST: "${BIND_HOST}"
-      TCP_PORT: "${VOICE_TCP_PORT}"
-      TCP_TLS_PORT: "${VOICE_TCP_TLS_PORT}"
-      HTTP_PORT: "${VOICE_HTTP_PORT}"
-      HTTP_TLS_PORT: "${VOICE_HTTP_TLS_PORT}"
-      WS_PORT: "${VOICE_WS_PORT}"
-      WS_TLS_PORT: "${VOICE_WS_TLS_PORT}"
-      TLS_CERT_FILE: "${TLS_CERT_FILE}"
-      TLS_KEY_FILE: "${TLS_KEY_FILE}"
-      # HTTP tuning
-      HTTP_RECV_TIMEOUT: "${HTTP_RECV_TIMEOUT}"
-      HTTP_SEND_MAX_BYTES: "${HTTP_SEND_MAX_BYTES}"
-      HTTP_SESSION_BUFFER_BYTES: "${HTTP_SESSION_BUFFER_BYTES}"
-      HTTP_SESSION_TTL: "${HTTP_SESSION_TTL}"
-      HTTP_SESSION_CLEANUP: "${HTTP_SESSION_CLEANUP}"
-      SHUTDOWN_TIMEOUT: "10s"
-      PG_DSN: "postgres://userdir:userdir@userdir_db:5432/userdir?sslmode=disable"
-      AVATAR_MAX_BYTES: "33554432"
-      SEARCH_MAX_RESULTS: "20"
-      SUBSCRIBE_MAX: "500"
-      CLEANUP_INTERVAL: "5m"
-    ports:
-      - "0.0.0.0:${VOICE_TCP_PORT}:${VOICE_TCP_PORT}"
-      - "0.0.0.0:${VOICE_HTTP_PORT}:${VOICE_HTTP_PORT}"
-      - "0.0.0.0:${VOICE_WS_PORT}:${VOICE_WS_PORT}"
+    expose:
+      - "${CHAT_HTTP_PORT}"
+      - "${CHAT_WS_PORT}"
     volumes:
       - "./certs:/certs:ro"
     restart: unless-stopped
