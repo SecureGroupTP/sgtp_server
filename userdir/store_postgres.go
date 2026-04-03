@@ -4,15 +4,19 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"errors"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 type Store struct {
 	db *sql.DB
 }
+
+var ErrUsernameTaken = errors.New("username already taken")
 
 type Profile struct {
 	PubKey       [32]byte
@@ -69,6 +73,12 @@ ALTER TABLE user_profiles
 UPDATE user_profiles
 SET expires_at = 'infinity'::timestamptz
 WHERE expires_at <> 'infinity'::timestamptz;
+
+DROP INDEX IF EXISTS user_profiles_username_unique_not_null;
+
+CREATE UNIQUE INDEX IF NOT EXISTS user_profiles_username_unique_not_null
+ON user_profiles (lower(username))
+WHERE username IS NOT NULL;
 `)
 	return err
 }
@@ -97,6 +107,12 @@ ON CONFLICT (pubkey) DO UPDATE SET
   updated_at = EXCLUDED.updated_at,
   expires_at = EXCLUDED.expires_at
 `, pubkey[:], usernameDB, fullname, avatar, sha[:], now, "infinity")
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "user_profiles_username_unique_not_null" {
+			return ErrUsernameTaken
+		}
+	}
 	return err
 }
 

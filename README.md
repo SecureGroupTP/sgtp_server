@@ -124,6 +124,7 @@ If `frame_len` exceeds the configured maximum (derived from `AVATAR_MAX_BYTES`) 
 ### REGISTER / UPDATE (`0x01`)
 
 Profile identity is the **public key** (`pubkey`). Sending REGISTER again with the same `pubkey` overwrites `username`, `fullname`, and `avatar` (upsert). Profiles are stored indefinitely.
+`username` must be unique across all profiles when present (case-insensitive, e.g. `@Alice` = `@alice`); `NULL` username is allowed and may appear in multiple profiles.
 
 Payload:
 

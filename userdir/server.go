@@ -608,6 +608,11 @@ func (s *Server) handleRegister(sub *connSub, payload []byte) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := s.store.UpsertProfile(ctx, pubkey, username, fullname, avatar); err != nil {
+		if errors.Is(err, ErrUsernameTaken) {
+			s.logger.Printf("[userdir] [%s] REGISTER: username already taken %q", sub.id, username)
+			s.sendError(sub, errBadRequest, "username already taken")
+			return nil
+		}
 		s.logger.Printf("[userdir] [%s] REGISTER: upsert failed: %v", sub.id, err)
 		s.sendError(sub, errInternal, "storage error")
 		return err
