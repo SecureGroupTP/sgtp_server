@@ -981,12 +981,21 @@ func (s *Server) notifyFriend(target [32]byte, eventType byte, status byte, acto
 	s.subsMu.RUnlock()
 
 	if len(targets) == 0 {
+		s.logger.Printf("[userdir] friend notify target=%s event=%d: no subscribers",
+			shortKey(target), eventType)
 		return
 	}
 	frame := writeFriendNotify(eventType, status, actor, room)
+	delivered, dropped := 0, 0
 	for _, sub := range targets {
-		sub.deliver(frame)
+		if sub.deliver(frame) {
+			delivered++
+		} else {
+			dropped++
+		}
 	}
+	s.logger.Printf("[userdir] friend notify target=%s event=%d status=%d actor=%s delivered=%d dropped=%d",
+		shortKey(target), eventType, status, shortKey(actor), delivered, dropped)
 }
 
 // ─── Frame builders ──────────────────────────────────────────────────────────
