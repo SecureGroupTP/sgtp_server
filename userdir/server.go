@@ -42,6 +42,8 @@ func msgTypeName(t byte) string {
 		return "FRIEND_RESPONSE"
 	case msgFriendSync:
 		return "FRIEND_SYNC"
+	case msgFriendDel:
+		return "FRIEND_DELETE"
 	case msgOK:
 		return "OK"
 	case msgError:
@@ -547,6 +549,10 @@ func (s *Server) ServeConn(ctx context.Context, r io.Reader, w io.Writer) {
 			if err := s.handleFriendSync(sub, payload); err != nil {
 				s.logger.Printf("[userdir] [%s] FRIEND_SYNC error: %v", connID, err)
 			}
+		case msgFriendDel:
+			if err := s.handleFriendDelete(sub, payload); err != nil {
+				s.logger.Printf("[userdir] [%s] FRIEND_DELETE error: %v", connID, err)
+			}
 		default:
 			s.logger.Printf("[userdir] [%s] unknown message type 0x%02x — sending error", connID, typ)
 			s.sendError(sub, errBadRequest, fmt.Sprintf("unknown message type 0x%02x", typ))
@@ -969,6 +975,42 @@ func (s *Server) handleFriendSync(sub *connSub, payload []byte) error {
 	}
 	frame := writeFriendSnapshot(snapshot)
 	sub.deliver(frame)
+	return nil
+}
+
+func (s *Server) handleFriendDelete(sub *connSub, payload []byte) error {
+	ver, self, peer, sigAlg, sig, signed, err := parseFriendDelete(payload)
+	if err != nil {
+		s.sendError(sub, errBadRequest, err.Error())
+		return err
+	}
+	if ver != 1 {
+		s.sendError(sub, errBadRequest, "unsupported version")
+		return nil
+	}
+	if sigAlg != 1 {
+		s.sendError(sub, errBadRequest, "unsupported signature algorithm")
+		return nil
+	}
+	if !ed25519.Verify(ed25519.PublicKey(self[:]), signed, sig) {
+		s.sendError(sub, errBadSig, "invalid signature")
+		return nil
+	}
+	if self == peer {
+		s.sendError(sub, errBadRequest, "cannot remove self")
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := s.store.RemoveFriendRelation(ctx, self, peer); err != nil {
+		s.sendError(sub, errInternal, "storage error")
+		return err
+	}
+	s.sendOK(sub, "OK")
+	// Trigger quick client refresh on both sides.
+	s.notifyFriend(self, friendEventRequestAnswer, 0, peer, nil)
+	s.notifyFriend(peer, friendEventRequestAnswer, 0, self, nil)
 	return nil
 }
 

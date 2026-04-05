@@ -268,7 +268,9 @@ ORDER BY updated_at DESC, id DESC
 LIMIT 1
 `, requester[:], recipient[:]).Scan(&status)
 	if err == nil {
-		if status == int(friendStatusPending) || status == int(friendStatusAccepted) {
+		// Deduplicate only an already-open outgoing pending request.
+		// Re-request after accepted/rejected is allowed by product flow.
+		if status == int(friendStatusPending) {
 			if err := tx.Commit(); err != nil {
 				return false, err
 			}
@@ -506,4 +508,32 @@ WHERE user_a = $1 AND user_b = $2
 	var room [16]byte
 	copy(room[:], raw)
 	return room, true, nil
+}
+
+func (s *Store) RemoveFriendRelation(ctx context.Context, a, b [32]byte) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	_, err = tx.ExecContext(ctx, `
+DELETE FROM friend_requests
+WHERE (requester = $1 AND recipient = $2)
+   OR (requester = $2 AND recipient = $1)
+`, a[:], b[:])
+	if err != nil {
+		return err
+	}
+
+	x, y := canonicalPair(a, b)
+	_, err = tx.ExecContext(ctx, `
+DELETE FROM dm_rooms
+WHERE user_a = $1 AND user_b = $2
+`, x[:], y[:])
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }

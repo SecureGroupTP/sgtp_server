@@ -16,6 +16,7 @@ const (
 	msgFriendReq   byte = 0x07 // signed friend request (requester -> recipient)
 	msgFriendResp  byte = 0x08 // signed friend response (recipient -> requester), yes/no
 	msgFriendSync  byte = 0x09 // signed snapshot request for current friend states
+	msgFriendDel   byte = 0x0a // signed remove friend relation (both directions)
 
 	msgOK      byte = 0x81
 	msgError   byte = 0x82
@@ -131,6 +132,22 @@ func parseFriendSync(payload []byte) (ver byte, self [32]byte, sigAlg byte, sig 
 	signed[0] = msgFriendSync
 	copy(signed[1:], payload[:len(payload)-64])
 	return ver, self, sigAlg, sig, signed, nil
+}
+
+func parseFriendDelete(payload []byte) (ver byte, self, peer [32]byte, sigAlg byte, sig []byte, signed []byte, err error) {
+	if len(payload) != 1+32+32+1+64 {
+		return 0, [32]byte{}, [32]byte{}, 0, nil, nil, fmt.Errorf("invalid friend delete payload")
+	}
+	ver = payload[0]
+	copy(self[:], payload[1:33])
+	copy(peer[:], payload[33:65])
+	sigAlg = payload[65]
+	sig = append([]byte(nil), payload[66:]...)
+
+	signed = make([]byte, 1+len(payload)-64)
+	signed[0] = msgFriendDel
+	copy(signed[1:], payload[:len(payload)-64])
+	return ver, self, peer, sigAlg, sig, signed, nil
 }
 
 func writeFriendSnapshot(states []FriendStateSnapshot) []byte {
