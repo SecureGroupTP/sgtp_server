@@ -36,6 +36,12 @@ func msgTypeName(t byte) string {
 		return "SUBSCRIBE"
 	case msgUnsubscribe:
 		return "UNSUBSCRIBE"
+	case msgFriendReq:
+		return "FRIEND_REQUEST"
+	case msgFriendResp:
+		return "FRIEND_RESPONSE"
+	case msgFriendSync:
+		return "FRIEND_SYNC"
 	case msgOK:
 		return "OK"
 	case msgError:
@@ -48,6 +54,10 @@ func msgTypeName(t byte) string {
 		return "META"
 	case msgNotify:
 		return "NOTIFY"
+	case msgFState:
+		return "FRIEND_STATE"
+	case msgFNotify:
+		return "FRIEND_NOTIFY"
 	default:
 		return fmt.Sprintf("UNKNOWN(0x%02x)", t)
 	}
@@ -57,7 +67,7 @@ func msgTypeName(t byte) string {
 
 // connSub tracks the subscription state for a single open connection.
 type connSub struct {
-	id     string     // short random-ish id for logs (remote addr)
+	id     string      // short random-ish id for logs (remote addr)
 	sendCh chan []byte // outbound frames (responses + async notifies)
 
 	mu   sync.Mutex
@@ -155,6 +165,12 @@ type Server struct {
 	closing   chan struct{}
 	wg        sync.WaitGroup
 }
+
+const (
+	friendEventRequestCreated byte = 1
+	friendEventRequestAnswer  byte = 2
+	friendEventDMReady        byte = 3
+)
 
 type Config struct {
 	Addr           string
@@ -519,6 +535,18 @@ func (s *Server) ServeConn(ctx context.Context, r io.Reader, w io.Writer) {
 			if err := s.handleUnsubscribe(sub, payload); err != nil {
 				s.logger.Printf("[userdir] [%s] UNSUBSCRIBE error: %v", connID, err)
 			}
+		case msgFriendReq:
+			if err := s.handleFriendRequest(sub, payload); err != nil {
+				s.logger.Printf("[userdir] [%s] FRIEND_REQUEST error: %v", connID, err)
+			}
+		case msgFriendResp:
+			if err := s.handleFriendResponse(sub, payload); err != nil {
+				s.logger.Printf("[userdir] [%s] FRIEND_RESPONSE error: %v", connID, err)
+			}
+		case msgFriendSync:
+			if err := s.handleFriendSync(sub, payload); err != nil {
+				s.logger.Printf("[userdir] [%s] FRIEND_SYNC error: %v", connID, err)
+			}
 		default:
 			s.logger.Printf("[userdir] [%s] unknown message type 0x%02x — sending error", connID, typ)
 			s.sendError(sub, errBadRequest, fmt.Sprintf("unknown message type 0x%02x", typ))
@@ -818,6 +846,147 @@ func (s *Server) handleUnsubscribe(sub *connSub, payload []byte) error {
 
 	s.sendOK(sub, "OK")
 	return nil
+}
+
+func (s *Server) handleFriendRequest(sub *connSub, payload []byte) error {
+	ver, requester, recipient, sigAlg, sig, signed, err := parseFriendRequest(payload)
+	if err != nil {
+		s.sendError(sub, errBadRequest, err.Error())
+		return err
+	}
+	if ver != 1 {
+		s.sendError(sub, errBadRequest, "unsupported version")
+		return nil
+	}
+	if sigAlg != 1 {
+		s.sendError(sub, errBadRequest, "unsupported signature algorithm")
+		return nil
+	}
+	if !ed25519.Verify(ed25519.PublicKey(requester[:]), signed, sig) {
+		s.sendError(sub, errBadSig, "invalid signature")
+		return nil
+	}
+	if requester == recipient {
+		s.sendError(sub, errBadRequest, "cannot friend self")
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	created, err := s.store.CreateFriendRequest(ctx, requester, recipient)
+	if err != nil {
+		s.sendError(sub, errInternal, "storage error")
+		return err
+	}
+	s.sendOK(sub, "OK")
+	if !created {
+		return nil
+	}
+
+	// Notify recipient they have an incoming pending request.
+	s.notifyFriend(recipient, friendEventRequestCreated, friendStatusPendingIncoming, requester, nil)
+	// Notify requester too so UI can mark outgoing pending immediately.
+	s.notifyFriend(requester, friendEventRequestCreated, friendStatusPendingOutgoing, recipient, nil)
+	return nil
+}
+
+func (s *Server) handleFriendResponse(sub *connSub, payload []byte) error {
+	ver, responder, requester, answer, sigAlg, sig, signed, err := parseFriendResponse(payload)
+	if err != nil {
+		s.sendError(sub, errBadRequest, err.Error())
+		return err
+	}
+	if ver != 1 {
+		s.sendError(sub, errBadRequest, "unsupported version")
+		return nil
+	}
+	if sigAlg != 1 {
+		s.sendError(sub, errBadRequest, "unsupported signature algorithm")
+		return nil
+	}
+	if !ed25519.Verify(ed25519.PublicKey(responder[:]), signed, sig) {
+		s.sendError(sub, errBadSig, "invalid signature")
+		return nil
+	}
+
+	accept := false
+	switch answer {
+	case 1:
+		accept = true
+	case 2:
+		accept = false
+	default:
+		s.sendError(sub, errBadRequest, "invalid answer")
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	status, room, err := s.store.RespondFriendRequest(ctx, responder, requester, accept)
+	if err != nil {
+		if errors.Is(err, ErrFriendRequestNotFound) {
+			s.sendError(sub, errNotFound, "friend request not found")
+			return nil
+		}
+		s.sendError(sub, errInternal, "storage error")
+		return err
+	}
+
+	s.sendOK(sub, "OK")
+	s.notifyFriend(requester, friendEventRequestAnswer, status, responder, room)
+	s.notifyFriend(responder, friendEventRequestAnswer, status, requester, room)
+	if room != nil {
+		s.notifyFriend(requester, friendEventDMReady, friendStatusFriend, responder, room)
+		s.notifyFriend(responder, friendEventDMReady, friendStatusFriend, requester, room)
+	}
+	return nil
+}
+
+func (s *Server) handleFriendSync(sub *connSub, payload []byte) error {
+	ver, self, sigAlg, sig, signed, err := parseFriendSync(payload)
+	if err != nil {
+		s.sendError(sub, errBadRequest, err.Error())
+		return err
+	}
+	if ver != 1 {
+		s.sendError(sub, errBadRequest, "unsupported version")
+		return nil
+	}
+	if sigAlg != 1 {
+		s.sendError(sub, errBadRequest, "unsupported signature algorithm")
+		return nil
+	}
+	if !ed25519.Verify(ed25519.PublicKey(self[:]), signed, sig) {
+		s.sendError(sub, errBadSig, "invalid signature")
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	snapshot, err := s.store.FriendSync(ctx, self)
+	if err != nil {
+		s.sendError(sub, errInternal, "storage error")
+		return err
+	}
+	frame := writeFriendSnapshot(snapshot)
+	sub.deliver(frame)
+	return nil
+}
+
+func (s *Server) notifyFriend(target [32]byte, eventType byte, status byte, actor [32]byte, room *[16]byte) {
+	s.subsMu.RLock()
+	targets := make([]*connSub, 0, len(s.subs[target]))
+	for sub := range s.subs[target] {
+		targets = append(targets, sub)
+	}
+	s.subsMu.RUnlock()
+
+	if len(targets) == 0 {
+		return
+	}
+	frame := writeFriendNotify(eventType, status, actor, room)
+	for _, sub := range targets {
+		sub.deliver(frame)
+	}
 }
 
 // ─── Frame builders ──────────────────────────────────────────────────────────

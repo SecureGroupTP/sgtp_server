@@ -13,6 +13,9 @@ const (
 	msgGetMeta     byte = 0x04 // lightweight: no avatar bytes
 	msgSubscribe   byte = 0x05 // subscribe to change notifications for a list of pubkeys
 	msgUnsubscribe byte = 0x06 // unsubscribe; count=0 means unsubscribe all
+	msgFriendReq   byte = 0x07 // signed friend request (requester -> recipient)
+	msgFriendResp  byte = 0x08 // signed friend response (recipient -> requester), yes/no
+	msgFriendSync  byte = 0x09 // signed snapshot request for current friend states
 
 	msgOK      byte = 0x81
 	msgError   byte = 0x82
@@ -20,6 +23,8 @@ const (
 	msgProfile byte = 0x84
 	msgMeta    byte = 0x85 // response to msgGetMeta
 	msgNotify  byte = 0x86 // server-pushed profile-change notification
+	msgFState  byte = 0x87 // response to msgFriendSync (friend-state snapshot)
+	msgFNotify byte = 0x88 // server-pushed friend notification
 )
 
 const (
@@ -78,6 +83,93 @@ func parseSubscribe(payload []byte) (ver byte, pubkeys [][32]byte, err error) {
 		copy(pubkeys[i][:], payload[3+i*32:3+(i+1)*32])
 	}
 	return ver, pubkeys, nil
+}
+
+func parseFriendRequest(payload []byte) (ver byte, requester, recipient [32]byte, sigAlg byte, sig []byte, signed []byte, err error) {
+	if len(payload) != 1+32+32+1+64 {
+		return 0, [32]byte{}, [32]byte{}, 0, nil, nil, fmt.Errorf("invalid friend request payload")
+	}
+	ver = payload[0]
+	copy(requester[:], payload[1:33])
+	copy(recipient[:], payload[33:65])
+	sigAlg = payload[65]
+	sig = append([]byte(nil), payload[66:]...)
+
+	signed = make([]byte, 1+len(payload)-64)
+	signed[0] = msgFriendReq
+	copy(signed[1:], payload[:len(payload)-64])
+	return ver, requester, recipient, sigAlg, sig, signed, nil
+}
+
+func parseFriendResponse(payload []byte) (ver byte, responder, requester [32]byte, answer byte, sigAlg byte, sig []byte, signed []byte, err error) {
+	if len(payload) != 1+32+32+1+1+64 {
+		return 0, [32]byte{}, [32]byte{}, 0, 0, nil, nil, fmt.Errorf("invalid friend response payload")
+	}
+	ver = payload[0]
+	copy(responder[:], payload[1:33])
+	copy(requester[:], payload[33:65])
+	answer = payload[65]
+	sigAlg = payload[66]
+	sig = append([]byte(nil), payload[67:]...)
+
+	signed = make([]byte, 1+len(payload)-64)
+	signed[0] = msgFriendResp
+	copy(signed[1:], payload[:len(payload)-64])
+	return ver, responder, requester, answer, sigAlg, sig, signed, nil
+}
+
+func parseFriendSync(payload []byte) (ver byte, self [32]byte, sigAlg byte, sig []byte, signed []byte, err error) {
+	if len(payload) != 1+32+1+64 {
+		return 0, [32]byte{}, 0, nil, nil, fmt.Errorf("invalid friend sync payload")
+	}
+	ver = payload[0]
+	copy(self[:], payload[1:33])
+	sigAlg = payload[33]
+	sig = append([]byte(nil), payload[34:]...)
+
+	signed = make([]byte, 1+len(payload)-64)
+	signed[0] = msgFriendSync
+	copy(signed[1:], payload[:len(payload)-64])
+	return ver, self, sigAlg, sig, signed, nil
+}
+
+func writeFriendSnapshot(states []FriendStateSnapshot) []byte {
+	if len(states) > 65535 {
+		states = states[:65535]
+	}
+	payload := make([]byte, 0, 3+len(states)*(32+1+1+16))
+	payload = append(payload, 1) // version
+
+	tmp2 := make([]byte, 2)
+	binary.BigEndian.PutUint16(tmp2, uint16(len(states)))
+	payload = append(payload, tmp2...)
+
+	for _, st := range states {
+		payload = append(payload, st.PeerPubKey[:]...)
+		payload = append(payload, st.Status)
+		if st.HasRoom {
+			payload = append(payload, 1)
+			payload = append(payload, st.RoomUUID[:]...)
+		} else {
+			payload = append(payload, 0)
+		}
+	}
+	return buildFrame(msgFState, payload)
+}
+
+func writeFriendNotify(eventType, status byte, actor [32]byte, room *[16]byte) []byte {
+	payload := make([]byte, 0, 1+1+32+1+1+16)
+	payload = append(payload, 1) // version
+	payload = append(payload, eventType)
+	payload = append(payload, actor[:]...)
+	payload = append(payload, status)
+	if room != nil {
+		payload = append(payload, 1)
+		payload = append(payload, room[:]...)
+	} else {
+		payload = append(payload, 0)
+	}
+	return buildFrame(msgFNotify, payload)
 }
 
 // writeNotify builds a complete msgNotify frame ready for the send channel.
