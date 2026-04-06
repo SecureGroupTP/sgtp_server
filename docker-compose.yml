@@ -21,10 +21,14 @@ services:
     depends_on:
       sgtp_chat:
         condition: service_started
+      sgtp_admin:
+        condition: service_started
     environment:
       NGINX_SERVER_NAME: "${NGINX_SERVER_NAME}"
       UPSTREAM_HOST: "sgtp_chat"
       UPSTREAM_PORT: "${CHAT_HTTP_PORT}"
+      ADMIN_HOST: "sgtp_admin"
+      ADMIN_PORT: "80"
     ports:
       - "0.0.0.0:80:80"
       - "0.0.0.0:443:443"
@@ -114,6 +118,18 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+
+  sgtp_admin:
+    container_name: sgtp_admin
+    build:
+      context: ../sgtp_frontend
+      dockerfile: Dockerfile
+    depends_on:
+      sgtp_chat:
+        condition: service_started
+    expose:
+      - "80"
+    restart: unless-stopped
 
 volumes:
   userdir_db_data:

@@ -197,6 +197,9 @@ func main() {
 	if adminSvc != nil {
 		adminHandler := admin.NewHTTPHandler(adminSvc)
 		ms.ExtraRegistrars = append(ms.ExtraRegistrars, adminHandler.Register)
+
+		apiV1Handler := admin.NewAPIV1Handler(adminSvc)
+		ms.ExtraRegistrars = append(ms.ExtraRegistrars, apiV1Handler.Register)
 	}
 
 	if err := ms.Start(ctx); err != nil {
