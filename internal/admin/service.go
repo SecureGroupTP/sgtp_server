@@ -269,7 +269,23 @@ func (s *Service) UsageStats(ctx context.Context, limit int) ([]map[string]any, 
 }
 
 func (s *Service) UsersStats(ctx context.Context, limit int) ([]map[string]any, error) {
-	return s.store.ListUsageTopByRequests(ctx, limit)
+	return s.store.ListUsersTopByRequests(ctx, limit)
+}
+
+func (s *Service) ListUsers(ctx context.Context, search, ipFilter, pubFilter, sortBy, sortOrder string, limit, offset int) ([]map[string]any, error) {
+	return s.store.ListUsersDetailed(ctx, search, ipFilter, pubFilter, sortBy, sortOrder, limit, offset)
+}
+
+func (s *Service) GetUserLimits(ctx context.Context, scope, subject string) (map[string]int64, error) {
+	return s.store.GetSubjectLimits(ctx, scope, subject)
+}
+
+func (s *Service) PutUserLimits(ctx context.Context, actorID int64, scope, subject string, limits map[string]int64) error {
+	if err := s.store.PutSubjectLimits(ctx, scope, subject, limits); err != nil {
+		return err
+	}
+	_ = s.store.InsertAudit(ctx, actorID, "limits.subject.update", "usage_subject_limits", scope+":"+subject, limits)
+	return nil
 }
 
 func (s *Service) TriggerBackup(ctx context.Context, actorID int64) (int64, error) {
@@ -358,32 +374,11 @@ func (s *Service) RecordNetworkUsage(ctx context.Context, ip, pubkey string, req
 }
 
 func (s *Service) CheckIPAllowed(ctx context.Context, ip string) error {
+	if err := s.CheckSubjectAllowed(ctx, "ip", ip); err != nil {
+		return err
+	}
 	if ip == "" {
 		return nil
-	}
-	banned, err := s.store.IsBanned(ctx, "ip", ip)
-	if err != nil {
-		return err
-	}
-	if banned {
-		return fmt.Errorf("ip banned")
-	}
-	limits, err := s.store.GetUsageLimits(ctx)
-	if err != nil {
-		return err
-	}
-	current, err := s.store.CurrentUsageBySubject(ctx, "ip", ip)
-	if err != nil {
-		return err
-	}
-	for bucket, limit := range limits.PerIP {
-		if limit <= 0 {
-			continue
-		}
-		v := current[bucket]["requests"]
-		if v >= limit {
-			return fmt.Errorf("rate limit exceeded: %s", bucket)
-		}
 	}
 	policy, err := s.store.GetAccessPolicy(ctx)
 	if err != nil {
@@ -404,6 +399,60 @@ func (s *Service) CheckIPAllowed(ctx context.Context, ip string) error {
 	default:
 		return nil
 	}
+}
+
+func (s *Service) CheckSubjectAllowed(ctx context.Context, scope, subject string) error {
+	if strings.TrimSpace(subject) == "" {
+		return nil
+	}
+	kind := scope
+	banned, err := s.store.IsBanned(ctx, kind, subject)
+	if err != nil {
+		return err
+	}
+	if banned {
+		return fmt.Errorf("%s banned", scope)
+	}
+
+	limits, err := s.store.GetUsageLimits(ctx)
+	if err != nil {
+		return err
+	}
+	merged := map[string]int64{}
+	switch scope {
+	case "ip":
+		for k, v := range limits.PerIP {
+			merged[k] = v
+		}
+	case "public_key":
+		for k, v := range limits.PerPubKey {
+			merged[k] = v
+		}
+	default:
+		return nil
+	}
+	custom, err := s.store.GetSubjectLimits(ctx, scope, subject)
+	if err != nil {
+		return err
+	}
+	for k, v := range custom {
+		merged[k] = v
+	}
+
+	current, err := s.store.CurrentUsageBySubject(ctx, scope, subject)
+	if err != nil {
+		return err
+	}
+	for bucket, limit := range merged {
+		if limit <= 0 {
+			continue
+		}
+		v := current[bucket]["requests"]
+		if v >= limit {
+			return fmt.Errorf("rate limit exceeded for %s: %s", scope, bucket)
+		}
+	}
+	return nil
 }
 
 func (s *Service) GetMaxRoomParticipants(ctx context.Context) int {

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -234,6 +235,43 @@ func (s *Store) PutUsageLimits(ctx context.Context, l UsageLimits) error {
 	return err
 }
 
+func (s *Store) GetSubjectLimits(ctx context.Context, scope, subject string) (map[string]int64, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT limits_json FROM usage_subject_limits WHERE scope=$1 AND subject=$2`, scope, subject)
+	var raw []byte
+	if err := row.Scan(&raw); err != nil {
+		if err == sql.ErrNoRows {
+			return map[string]int64{}, nil
+		}
+		return nil, err
+	}
+	out := map[string]int64{}
+	_ = json.Unmarshal(raw, &out)
+	return out, nil
+}
+
+func (s *Store) PutSubjectLimits(ctx context.Context, scope, subject string, limits map[string]int64) error {
+	if scope != "ip" && scope != "public_key" {
+		return fmt.Errorf("invalid scope")
+	}
+	if strings.TrimSpace(subject) == "" {
+		return fmt.Errorf("subject is empty")
+	}
+	if limits == nil {
+		limits = map[string]int64{}
+	}
+	raw, err := json.Marshal(limits)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
+INSERT INTO usage_subject_limits (scope, subject, limits_json, updated_at)
+VALUES ($1,$2,$3,now())
+ON CONFLICT (scope, subject)
+DO UPDATE SET limits_json=EXCLUDED.limits_json, updated_at=now()
+`, scope, subject, raw)
+	return err
+}
+
 func (s *Store) GetSetting(ctx context.Context, key string) (json.RawMessage, error) {
 	var raw []byte
 	err := s.db.QueryRowContext(ctx, `SELECT value_json FROM server_settings WHERE key=$1`, key).Scan(&raw)
@@ -318,9 +356,19 @@ func (s *Store) ListUsageTopByRequests(ctx context.Context, limit int) ([]map[st
 		limit = 50
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT ip, COALESCE(public_key,''), first_use, last_use, requests, bytes_recv, bytes_sent, transport, last_status
+SELECT
+  ip,
+  COALESCE(public_key,'') AS public_key,
+  MIN(first_use) AS first_use,
+  MAX(last_use) AS last_use,
+  SUM(requests) AS requests,
+  SUM(bytes_recv) AS bytes_recv,
+  SUM(bytes_sent) AS bytes_sent,
+  MAX(transport) AS transport,
+  MAX(last_status) AS last_status
 FROM client_activity
-ORDER BY requests DESC
+GROUP BY ip, COALESCE(public_key,'')
+ORDER BY SUM(requests) DESC, MAX(last_use) DESC
 LIMIT $1
 `, limit)
 	if err != nil {
@@ -350,9 +398,151 @@ LIMIT $1
 	return out, rows.Err()
 }
 
+func (s *Store) ListUsersTopByRequests(ctx context.Context, limit int) ([]map[string]any, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT
+  CASE WHEN COALESCE(public_key,'') <> '' THEN COALESCE(public_key,'')
+       ELSE CONCAT('ip:', ip) END AS user_key,
+  COALESCE(NULLIF(public_key,''), '') AS public_key,
+  STRING_AGG(DISTINCT ip, ', ' ORDER BY ip) AS ips,
+  MIN(first_use) AS first_use,
+  MAX(last_use) AS last_use,
+  SUM(requests) AS requests,
+  SUM(bytes_recv) AS bytes_recv,
+  SUM(bytes_sent) AS bytes_sent
+FROM client_activity
+GROUP BY
+  CASE WHEN COALESCE(public_key,'') <> '' THEN COALESCE(public_key,'')
+       ELSE CONCAT('ip:', ip) END,
+  COALESCE(NULLIF(public_key,''), '')
+ORDER BY SUM(requests) DESC, MAX(last_use) DESC
+LIMIT $1
+`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]map[string]any, 0, limit)
+	for rows.Next() {
+		var userKey, pub, ips string
+		var first, last time.Time
+		var req, br, bs int64
+		if err := rows.Scan(&userKey, &pub, &ips, &first, &last, &req, &br, &bs); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{
+			"user_key":   userKey,
+			"public_key": pub,
+			"ips":        ips,
+			"first_use":  first,
+			"last_use":   last,
+			"requests":   req,
+			"bytes_recv": br,
+			"bytes_sent": bs,
+		})
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListUsersDetailed(ctx context.Context, search, ipFilter, pubFilter, sortBy, sortOrder string, limit, offset int) ([]map[string]any, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	sortColumn := map[string]string{
+		"requests":     "requests",
+		"bytes_recv":   "bytes_recv",
+		"bytes_sent":   "bytes_sent",
+		"summary_data": "summary_data",
+		"first_use":    "first_use",
+		"last_use":     "last_use",
+		"user_key":     "user_key",
+	}[strings.ToLower(strings.TrimSpace(sortBy))]
+	if sortColumn == "" {
+		sortColumn = "requests"
+	}
+	order := "DESC"
+	if strings.EqualFold(strings.TrimSpace(sortOrder), "asc") {
+		order = "ASC"
+	}
+
+	q := fmt.Sprintf(`
+WITH grouped AS (
+  SELECT
+    CASE WHEN COALESCE(public_key,'') <> '' THEN COALESCE(public_key,'')
+         ELSE CONCAT('ip:', ip) END AS user_key,
+    COALESCE(NULLIF(public_key,''), '') AS public_key,
+    STRING_AGG(DISTINCT ip, ', ' ORDER BY ip) AS ips,
+    MIN(first_use) AS first_use,
+    MAX(last_use) AS last_use,
+    SUM(requests) AS requests,
+    SUM(bytes_recv) AS bytes_recv,
+    SUM(bytes_sent) AS bytes_sent,
+    (SUM(bytes_recv) + SUM(bytes_sent)) AS summary_data
+  FROM client_activity
+  GROUP BY
+    CASE WHEN COALESCE(public_key,'') <> '' THEN COALESCE(public_key,'')
+         ELSE CONCAT('ip:', ip) END,
+    COALESCE(NULLIF(public_key,''), '')
+)
+SELECT user_key, public_key, ips, first_use, last_use, requests, bytes_recv, bytes_sent, summary_data
+FROM grouped
+WHERE ($1 = '' OR user_key ILIKE $1 OR ips ILIKE $1)
+  AND ($2 = '' OR ips ILIKE $2)
+  AND ($3 = '' OR public_key ILIKE $3)
+ORDER BY %s %s, last_use DESC
+LIMIT $4 OFFSET $5
+`, sortColumn, order)
+
+	searchPat := likePattern(search)
+	ipPat := likePattern(ipFilter)
+	pubPat := likePattern(pubFilter)
+
+	rows, err := s.db.QueryContext(ctx, q, searchPat, ipPat, pubPat, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]map[string]any, 0, limit)
+	for rows.Next() {
+		var userKey, pub, ips string
+		var first, last time.Time
+		var req, br, bs, sum int64
+		if err := rows.Scan(&userKey, &pub, &ips, &first, &last, &req, &br, &bs, &sum); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{
+			"user_key":     userKey,
+			"public_key":   pub,
+			"ips":          ips,
+			"first_use":    first,
+			"last_use":     last,
+			"requests":     req,
+			"bytes_recv":   br,
+			"bytes_sent":   bs,
+			"summary_data": sum,
+		})
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) UpsertClientActivity(ctx context.Context, ip, pubkey string, req, bytesRecv, bytesSent int64, transport, status string) error {
 	if ip == "" {
 		return nil
+	}
+	if pubkey == "" {
+		pubkey = ""
 	}
 	if transport == "" {
 		transport = "tcp"
@@ -371,7 +561,7 @@ DO UPDATE SET
   bytes_sent=client_activity.bytes_sent + EXCLUDED.bytes_sent,
   transport=EXCLUDED.transport,
   last_status=EXCLUDED.last_status
-`, ip, nullIfEmpty(pubkey), req, bytesRecv, bytesSent, transport, status)
+`, ip, pubkey, req, bytesRecv, bytesSent, transport, status)
 	return err
 }
 
@@ -466,13 +656,6 @@ func (s *Store) ValidatePasswordGate(ctx context.Context, provided string) (bool
 	return CheckPassword(hash, provided)
 }
 
-func nullIfEmpty(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
-}
-
 func (s *Store) GetNetworkSettings(ctx context.Context) (json.RawMessage, error) {
 	return s.GetSetting(ctx, "network")
 }
@@ -482,6 +665,14 @@ func (s *Store) PutNetworkSettings(ctx context.Context, raw json.RawMessage) err
 		return fmt.Errorf("network settings are empty")
 	}
 	return s.PutSetting(ctx, "network", raw)
+}
+
+func likePattern(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
+	}
+	return "%" + v + "%"
 }
 
 func (s *Store) UsernameInactiveDays(ctx context.Context) (int, error) {

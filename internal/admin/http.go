@@ -49,6 +49,9 @@ func (h *HTTPHandler) Register(mux *http.ServeMux) {
 
 	mux.HandleFunc("POST /admin/users", h.requireAuth(h.handleCreateUser))
 	mux.HandleFunc("POST /admin/users/change-password", h.requireAuth(h.handleChangePassword))
+	mux.HandleFunc("GET /admin/users/list", h.requireAuth(h.handleUsersList))
+	mux.HandleFunc("GET /admin/users/limit", h.requireAuth(h.handleGetUserLimit))
+	mux.HandleFunc("PUT /admin/users/limit", h.requireAuth(h.handlePutUserLimit))
 }
 
 func (h *HTTPHandler) handleUI(w http.ResponseWriter, _ *http.Request) {
@@ -374,6 +377,64 @@ func (h *HTTPHandler) handleChangePassword(w http.ResponseWriter, r *http.Reques
 	}
 	if err := h.svc.ChangePassword(r.Context(), actor.ID, req.NewPassword, true); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *HTTPHandler) handleUsersList(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	search := q.Get("search")
+	ipFilter := q.Get("ip")
+	pubFilter := q.Get("public_key")
+	sortBy := q.Get("sort")
+	order := q.Get("order")
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	items, err := h.svc.ListUsers(r.Context(), search, ipFilter, pubFilter, sortBy, order, limit, offset)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "limit": limit, "offset": offset})
+}
+
+func (h *HTTPHandler) handleGetUserLimit(w http.ResponseWriter, r *http.Request) {
+	scope := r.URL.Query().Get("scope")
+	subject := r.URL.Query().Get("subject")
+	if scope == "" || subject == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "scope and subject are required"})
+		return
+	}
+	limits, err := h.svc.GetUserLimits(r.Context(), scope, subject)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"scope": scope, "subject": subject, "limits": limits})
+}
+
+func (h *HTTPHandler) handlePutUserLimit(w http.ResponseWriter, r *http.Request) {
+	actor := userFromCtx(r.Context())
+	if actor == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+		return
+	}
+	var req struct {
+		Scope   string           `json:"scope"`
+		Subject string           `json:"subject"`
+		Limits  map[string]int64 `json:"limits"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	if req.Scope == "" || req.Subject == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "scope and subject are required"})
+		return
+	}
+	if err := h.svc.PutUserLimits(r.Context(), actor.ID, req.Scope, req.Subject, req.Limits); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})

@@ -257,6 +257,7 @@
           <button data-tab="network">Network</button>
           <button data-tab="bans">Bans</button>
           <button data-tab="backups">Backups</button>
+          <button data-tab="users">Users</button>
           <button data-tab="admins">Admins</button>
           <button data-tab="password">Change password</button>
         </div>
@@ -377,6 +378,55 @@
               <button class="secondary" id="refreshBackupsBtn" type="button">Refresh jobs</button>
             </div>
             <div id="backupsWrap"></div>
+          </section>
+
+          <section class="section" id="tab-users">
+            <h2>Users</h2>
+            <p class="sub">Search and sort users by ip/public key/traffic. Set per-user limits or ban directly.</p>
+            <div class="row">
+              <div>
+                <label for="usersSearch">Search (user/ip/key)</label>
+                <input id="usersSearch" placeholder="91.122 or pubkey..." />
+              </div>
+              <div>
+                <label for="usersIpFilter">IP filter</label>
+                <input id="usersIpFilter" placeholder="91.122.5.120" />
+              </div>
+            </div>
+            <div class="row">
+              <div>
+                <label for="usersPubFilter">Public key filter</label>
+                <input id="usersPubFilter" placeholder="hex public key" />
+              </div>
+              <div>
+                <label for="usersSort">Sort by</label>
+                <select id="usersSort">
+                  <option value="requests">requests</option>
+                  <option value="bytes_recv">bytes_recv</option>
+                  <option value="bytes_sent">bytes_sent</option>
+                  <option value="summary_data">summary_data</option>
+                  <option value="first_use">first_use</option>
+                  <option value="last_use">last_use</option>
+                </select>
+              </div>
+            </div>
+            <div class="row">
+              <div>
+                <label for="usersOrder">Order</label>
+                <select id="usersOrder">
+                  <option value="desc">desc</option>
+                  <option value="asc">asc</option>
+                </select>
+              </div>
+              <div>
+                <label for="usersLimit">Limit</label>
+                <input id="usersLimit" type="number" value="50" min="1" max="500" />
+              </div>
+            </div>
+            <div class="btns">
+              <button class="primary" id="refreshUsersListBtn" type="button">Search users</button>
+            </div>
+            <div id="usersListWrap"></div>
           </section>
 
           <section class="section" id="tab-admins">
@@ -550,14 +600,86 @@
     async function loadUsers() {
       const data = await api('/admin/stats/users?limit=20');
       const rows = data.map((x) => [
-        '<span class="mono">' + x.ip + '</span>',
+        '<span class="mono">' + (x.user_key || '') + '</span>',
         '<span class="mono">' + (x.public_key || '') + '</span>',
+        '<span class="mono">' + (x.ips || '') + '</span>',
         x.requests,
+        x.bytes_recv,
+        x.bytes_sent,
         x.last_use,
       ]);
       document.getElementById('usersWrap').innerHTML = tableFromRows(
-        ['IP', 'Public key', 'Requests', 'Last use'], rows
+        ['User key', 'Public key', 'IPs', 'Requests', 'Bytes recv', 'Bytes sent', 'Last use'], rows
       );
+    }
+
+    async function loadUsersList() {
+      const q = new URLSearchParams({
+        search: document.getElementById('usersSearch').value.trim(),
+        ip: document.getElementById('usersIpFilter').value.trim(),
+        public_key: document.getElementById('usersPubFilter').value.trim(),
+        sort: document.getElementById('usersSort').value,
+        order: document.getElementById('usersOrder').value,
+        limit: document.getElementById('usersLimit').value || '50',
+        offset: '0',
+      });
+      const data = await api('/admin/users/list?' + q.toString());
+      const rows = (data.items || []).map((x) => {
+        const banIpBtn = x.ips
+          ? '<button class="danger" data-ban-kind="ip" data-ban-value="' + escapeAttr(x.ips.split(',')[0].trim()) + '">Ban first IP</button>'
+          : '';
+        const banPubBtn = x.public_key
+          ? '<button class="danger" data-ban-kind="public_key" data-ban-value="' + escapeAttr(x.public_key) + '">Ban pubkey</button>'
+          : '';
+        const limitIpBtn = x.ips
+          ? '<button class="secondary" data-limit-scope="ip" data-limit-subject="' + escapeAttr(x.ips.split(',')[0].trim()) + '">Set IP limit</button>'
+          : '';
+        const limitPubBtn = x.public_key
+          ? '<button class="secondary" data-limit-scope="public_key" data-limit-subject="' + escapeAttr(x.public_key) + '">Set pubkey limit</button>'
+          : '';
+        return [
+          '<span class="mono">' + (x.user_key || '') + '</span>',
+          '<span class="mono">' + (x.public_key || '') + '</span>',
+          '<span class="mono">' + (x.ips || '') + '</span>',
+          x.requests,
+          x.bytes_recv,
+          x.bytes_sent,
+          x.summary_data,
+          x.first_use || '',
+          x.last_use || '',
+          banIpBtn + ' ' + banPubBtn + ' ' + limitIpBtn + ' ' + limitPubBtn,
+        ];
+      });
+      document.getElementById('usersListWrap').innerHTML = tableFromRows(
+        ['User key', 'Public key', 'IPs', 'Requests', 'Bytes recv', 'Bytes sent', 'Summary', 'First use', 'Last use', 'Actions'],
+        rows
+      );
+      document.querySelectorAll('[data-ban-kind]').forEach((btn) => {
+        btn.addEventListener('click', () => runSafe(async () => {
+          const kind = btn.getAttribute('data-ban-kind');
+          const value = btn.getAttribute('data-ban-value');
+          const reason = prompt('Ban reason for ' + kind + ' ' + value + ':', 'manual ban from users list') || '';
+          await api('/admin/bans', { method: 'POST', body: { kind, value, reason } });
+          showStatus('mainStatus', 'Ban created for ' + kind + ': ' + value, true);
+        }));
+      });
+      document.querySelectorAll('[data-limit-scope]').forEach((btn) => {
+        btn.addEventListener('click', () => runSafe(async () => {
+          const scope = btn.getAttribute('data-limit-scope');
+          const subject = btn.getAttribute('data-limit-subject');
+          const current = await api('/admin/users/limit?scope=' + encodeURIComponent(scope) + '&subject=' + encodeURIComponent(subject));
+          const currentJSON = JSON.stringify(current.limits || {}, null, 2);
+          const next = prompt('Set per-user limits JSON for ' + scope + ' ' + subject + '\\nExample: {\"minute\":1000,\"day\":50000}', currentJSON);
+          if (next === null) return;
+          const limits = JSON.parse(next || '{}');
+          await api('/admin/users/limit', { method: 'PUT', body: { scope, subject, limits } });
+          showStatus('mainStatus', 'Limits updated for ' + scope + ': ' + subject, true);
+        }));
+      });
+    }
+
+    function escapeAttr(v) {
+      return String(v || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
     async function loadAccess() {
@@ -749,7 +871,7 @@
     }
 
     async function bootstrapData() {
-      await Promise.allSettled([loadUsage(), loadUsers(), loadAccess(), loadLimits(), loadNetwork(), loadBans(), loadBackups()]);
+      await Promise.allSettled([loadUsage(), loadUsers(), loadUsersList(), loadAccess(), loadLimits(), loadNetwork(), loadBans(), loadBackups()]);
     }
 
     function bindEvents() {
@@ -774,6 +896,7 @@
 
       document.getElementById('runBackupBtn').addEventListener('click', () => runSafe(runBackup));
       document.getElementById('refreshBackupsBtn').addEventListener('click', () => runSafe(loadBackups));
+      document.getElementById('refreshUsersListBtn').addEventListener('click', () => runSafe(loadUsersList));
 
       document.getElementById('createAdminBtn').addEventListener('click', () => runSafe(createAdmin));
       document.getElementById('changePasswordBtn').addEventListener('click', () => runSafe(changePassword));

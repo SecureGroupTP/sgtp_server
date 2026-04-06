@@ -16,6 +16,7 @@ package server
 import (
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -31,6 +32,7 @@ import (
 
 type PolicyEngine interface {
 	CheckIPAllowed(ctx context.Context, ip string) error
+	CheckSubjectAllowed(ctx context.Context, scope, subject string) error
 	RecordNetworkUsage(ctx context.Context, ip, pubkey string, requests, bytesRecv, bytesSent int64, transport, status string)
 	GetMaxRoomParticipants(ctx context.Context) int
 }
@@ -525,6 +527,7 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 	}()
 
 	// ── Forward loop ─────────────────────────────────────────────────────────
+	trackedPubKey := ""
 	for {
 		select {
 		case <-ctx.Done():
@@ -544,7 +547,20 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 			return
 		}
 		if s.policy != nil {
-			s.policy.RecordNetworkUsage(ctx, ip, "", 1, int64(len(raw)), 0, "tcp", "frame_in")
+			if err := s.policy.CheckSubjectAllowed(ctx, "ip", ip); err != nil {
+				s.logger.Printf("[server] deny frame remote=%s ip=%s reason=%v", remote, ip, err)
+				return
+			}
+			if pk, ok := extractPubKeyFromFrame(raw, fhdr); ok {
+				trackedPubKey = pk
+			}
+			if trackedPubKey != "" {
+				if err := s.policy.CheckSubjectAllowed(ctx, "public_key", trackedPubKey); err != nil {
+					s.logger.Printf("[server] deny frame remote=%s pubkey=%s reason=%v", remote, trackedPubKey[:8], err)
+					return
+				}
+			}
+			s.policy.RecordNetworkUsage(ctx, ip, trackedPubKey, 1, int64(len(raw)), 0, "tcp", "frame_in")
 		}
 
 		s.logger.Printf("[server] relay type=0x%02x from=%x to=%x len=%d",
@@ -556,7 +572,7 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 			r.unicast(fhdr.ReceiverUUID, raw)
 		}
 		if s.policy != nil {
-			s.policy.RecordNetworkUsage(ctx, ip, "", 0, 0, int64(len(raw)), "tcp", "frame_out")
+			s.policy.RecordNetworkUsage(ctx, ip, trackedPubKey, 0, 0, int64(len(raw)), "tcp", "frame_out")
 		}
 	}
 }
@@ -590,6 +606,22 @@ func parseRemoteIP(remote string) string {
 		return remote
 	}
 	return host
+}
+
+// extractPubKeyFromFrame tries to recover sender Ed25519 pubkey from SGTP
+// handshake packets (PING/PONG payload layout: 32 x25519 + 32 ed25519 + body).
+func extractPubKeyFromFrame(raw []byte, hdr *protocol.Header) (string, bool) {
+	if hdr == nil {
+		return "", false
+	}
+	if hdr.PacketType != protocol.TypePing && hdr.PacketType != protocol.TypePong {
+		return "", false
+	}
+	if len(raw) < protocol.HeaderSize+64 {
+		return "", false
+	}
+	pub := raw[protocol.HeaderSize+32 : protocol.HeaderSize+64]
+	return hex.EncodeToString(pub), true
 }
 
 // readRawFrame reads exactly one complete SGTP frame from r.
