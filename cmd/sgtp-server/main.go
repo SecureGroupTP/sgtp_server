@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/SecureGroupTP/sgtp_server/internal/admin"
 	"github.com/SecureGroupTP/sgtp_server/internal/mtransport"
 	"github.com/SecureGroupTP/sgtp_server/server"
 	"github.com/SecureGroupTP/sgtp_server/userdir"
@@ -34,6 +35,7 @@ func main() {
 
 	// ── Optional userdir (enabled when PG_DSN is set) ────────────────────────
 	var ud *userdir.Server
+	var adminSvc *admin.Service
 	if dsn := os.Getenv("PG_DSN"); dsn != "" {
 		avatarMax, err := uint32FromEnv("AVATAR_MAX_BYTES", 33554432)
 		if err != nil {
@@ -76,6 +78,38 @@ func main() {
 		}()
 
 		logger.Printf("[server] userdir enabled (inline mux on same port)")
+
+		adminStore, err := admin.OpenStore(ctx, dsn)
+		if err != nil {
+			logger.Fatalf("[server] admin open store: %v", err)
+		}
+		defer adminStore.Close()
+
+		accessTTL, err := durationFromEnv("ADMIN_ACCESS_TTL", 15*time.Minute)
+		if err != nil {
+			logger.Fatalf("[server] invalid ADMIN_ACCESS_TTL: %v", err)
+		}
+		refreshTTL, err := durationFromEnv("ADMIN_REFRESH_TTL", 7*24*time.Hour)
+		if err != nil {
+			logger.Fatalf("[server] invalid ADMIN_REFRESH_TTL: %v", err)
+		}
+		adminSvc, err = admin.NewService(admin.Config{
+			Store:            adminStore,
+			Logger:           logger,
+			JWTSecret:        []byte(os.Getenv("ADMIN_JWT_SECRET")),
+			AccessTTL:        accessTTL,
+			RefreshTTL:       refreshTTL,
+			BootstrapOutFile: os.Getenv("ADMIN_BOOTSTRAP_FILE"),
+			PGDSN:            dsn,
+		})
+		if err != nil {
+			logger.Fatalf("[server] admin init: %v", err)
+		}
+		if err := adminSvc.EnsureBootstrapRoot(ctx); err != nil {
+			logger.Fatalf("[server] admin bootstrap: %v", err)
+		}
+		go adminSvc.RunMaintenanceLoop(ctx, 1*time.Hour)
+		logger.Printf("[server] admin control plane enabled")
 	}
 
 	ports, err := multiPortsFromEnv()
@@ -94,6 +128,9 @@ func main() {
 			log.Fatalf("[server] invalid env: %v", err)
 		}
 		srv := server.New(addr, logger, ud)
+		if adminSvc != nil {
+			srv.SetPolicyEngine(adminSvc)
+		}
 
 		go func() {
 			<-ctx.Done()
@@ -141,6 +178,9 @@ func main() {
 	}
 
 	relay := server.New("", logger, ud)
+	if adminSvc != nil {
+		relay.SetPolicyEngine(adminSvc)
+	}
 	ms := &mtransport.MultiServer{
 		Logger:           logger,
 		Relay:            relay,
@@ -153,6 +193,10 @@ func main() {
 		HTTPBufferBytes:  httpBuf,
 		HTTPSessionTTL:   httpTTL,
 		HTTPCleanupEvery: httpCleanup,
+	}
+	if adminSvc != nil {
+		adminHandler := admin.NewHTTPHandler(adminSvc)
+		ms.ExtraRegistrars = append(ms.ExtraRegistrars, adminHandler.Register)
 	}
 
 	if err := ms.Start(ctx); err != nil {

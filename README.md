@@ -23,6 +23,7 @@ Services and default host ports (see `.env`):
 - `sgtp_chat` → `250/tcp` — chat relay + userdir
 - `sgtp_voice` → `251/tcp` — voice relay + userdir
 - `userdir_db` → internal Postgres only (persisted via volume, `127.0.0.1:5432` on host)
+- `flyway` → one-shot migration runner (required; applies `db/migrations/*.sql` before `sgtp_chat`)
 
 ## User directory: connecting on a relay port
 
@@ -89,6 +90,30 @@ User directory (enabled when `PG_DSN` is set; both `sgtp_chat` and `sgtp_voice` 
 - `SEARCH_MAX_RESULTS` — hard cap for search responses (default: `20`)
 - `SUBSCRIBE_MAX` — max pubkeys one connection may subscribe to at once (default: `500`)
 - `CLEANUP_INTERVAL` — cleanup loop interval (default: `5m`; currently profiles are stored indefinitely)
+
+Admin control plane (enabled when `PG_DSN` is set):
+
+- `ADMIN_JWT_SECRET` — HMAC secret for admin access tokens (recommended to set explicitly)
+- `ADMIN_ACCESS_TTL` — access token TTL (default: `15m`)
+- `ADMIN_REFRESH_TTL` — refresh token TTL (default: `168h`)
+- `ADMIN_BOOTSTRAP_FILE` — where bootstrap root credentials are written once (default: `./admin_bootstrap_credentials.txt`)
+
+On first start (empty `admin_users`) server creates exactly one bootstrap root account with random 64-char login/password and writes it into `ADMIN_BOOTSTRAP_FILE`.
+After first creation, bootstrap account is never auto-created again.
+
+Admin HTTP API lives on the same HTTP/HTTPS listeners:
+
+- `POST /admin/auth/login`
+- `POST /admin/auth/refresh`
+- `POST /admin/auth/logout`
+- `GET/PUT /admin/settings/network` (apply by graceful restart/reload)
+- `GET/PUT /admin/settings/access`
+- `GET/POST/DELETE /admin/bans`
+- `GET/PUT /admin/limits`
+- `GET /admin/stats/usage`
+- `GET /admin/stats/users`
+- `POST /admin/backups/run`
+- `GET /admin/backups`
 
 ## Userdir wire protocol (binary, big-endian)
 

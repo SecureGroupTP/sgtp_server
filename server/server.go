@@ -29,6 +29,12 @@ import (
 	"github.com/SecureGroupTP/sgtp_server/userdir"
 )
 
+type PolicyEngine interface {
+	CheckIPAllowed(ctx context.Context, ip string) error
+	RecordNetworkUsage(ctx context.Context, ip, pubkey string, requests, bytesRecv, bytesSent int64, transport, status string)
+	GetMaxRoomParticipants(ctx context.Context) int
+}
+
 // ─── room ─────────────────────────────────────────────────────────────────────
 
 type room struct {
@@ -226,6 +232,7 @@ type Server struct {
 	// userdirSrv is optional. When non-nil, connections whose first 32 bytes
 	// are all zero are routed to the userdir handler instead of the relay.
 	userdirSrv *userdir.Server
+	policy     PolicyEngine
 
 	roomsMu sync.RWMutex
 	rooms   map[[16]byte]*room
@@ -257,6 +264,10 @@ func New(addr string, logger *log.Logger, ud *userdir.Server) *Server {
 		conns:       make(map[*conn]struct{}),
 		closing:     make(chan struct{}),
 	}
+}
+
+func (s *Server) SetPolicyEngine(policy PolicyEngine) {
+	s.policy = policy
 }
 
 // ListenAndServe starts the TCP listener and blocks until it returns an error
@@ -402,7 +413,16 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 	done := make(chan struct{})
 	defer close(done)
 	remote := nc.RemoteAddr().String()
+	ip := parseRemoteIP(remote)
 	s.logger.Printf("[server] new connection from %s", remote)
+
+	if s.policy != nil {
+		if err := s.policy.CheckIPAllowed(ctx, ip); err != nil {
+			s.logger.Printf("[server] deny connection remote=%s ip=%s reason=%v", remote, ip, err)
+			return
+		}
+		s.policy.RecordNetworkUsage(ctx, ip, "", 1, 0, 0, "tcp", "connected")
+	}
 
 	go func() {
 		select {
@@ -470,6 +490,13 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 
 	// ── Register client in room ──────────────────────────────────────────────
 	r := s.getOrCreateRoom(roomID)
+	if s.policy != nil {
+		maxParticipants := s.policy.GetMaxRoomParticipants(ctx)
+		if maxParticipants > 0 && r.count() >= maxParticipants {
+			s.logger.Printf("[server] reject join room=%x ip=%s reason=room_full limit=%d", roomID[:4], ip, maxParticipants)
+			return
+		}
+	}
 
 	// Broadcast the intent frame to existing members BEFORE adding the new client.
 	r.broadcast(senderID, intentRaw)
@@ -516,6 +543,9 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 			}
 			return
 		}
+		if s.policy != nil {
+			s.policy.RecordNetworkUsage(ctx, ip, "", 1, int64(len(raw)), 0, "tcp", "frame_in")
+		}
 
 		s.logger.Printf("[server] relay type=0x%02x from=%x to=%x len=%d",
 			uint16(fhdr.PacketType), senderID[:4], fhdr.ReceiverUUID[:4], len(raw))
@@ -524,6 +554,9 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 			r.broadcast(senderID, raw)
 		} else {
 			r.unicast(fhdr.ReceiverUUID, raw)
+		}
+		if s.policy != nil {
+			s.policy.RecordNetworkUsage(ctx, ip, "", 0, 0, int64(len(raw)), "tcp", "frame_out")
 		}
 	}
 }
@@ -549,6 +582,14 @@ func isAllZero(b []byte) bool {
 		}
 	}
 	return true
+}
+
+func parseRemoteIP(remote string) string {
+	host, _, err := net.SplitHostPort(remote)
+	if err != nil {
+		return remote
+	}
+	return host
 }
 
 // readRawFrame reads exactly one complete SGTP frame from r.

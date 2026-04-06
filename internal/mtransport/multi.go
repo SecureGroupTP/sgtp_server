@@ -35,6 +35,7 @@ type MultiServer struct {
 	HTTPBufferBytes  int
 	HTTPSessionTTL   time.Duration
 	HTTPCleanupEvery time.Duration
+	ExtraRegistrars  []func(*http.ServeMux)
 
 	mu       sync.Mutex
 	tcpLn    net.Listener
@@ -109,6 +110,9 @@ func (m *MultiServer) Start(ctx context.Context) error {
 		mux.HandleFunc("GET /healthz", healthHandler)
 		mux.HandleFunc("GET /sgtp/discovery", discoveryHandler.ServeHTTP)
 		mux.HandleFunc("HEAD /sgtp/discovery", discoveryHandler.ServeHTTP)
+		for _, register := range m.ExtraRegistrars {
+			register(mux)
+		}
 		return mux
 	}
 
