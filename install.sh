@@ -72,8 +72,15 @@ ensure_env_file() {
   local domain
   domain="$(get_env NGINX_SERVER_NAME)"
   if [[ -z "$domain" ]]; then
-    set_env "NGINX_SERVER_NAME" "localhost"
-    log "Set NGINX_SERVER_NAME=localhost"
+    if [[ -t 0 ]]; then
+      printf '[install] Enter domain for NGINX_SERVER_NAME (leave empty for localhost): '
+      read -r domain || true
+      domain="${domain:-localhost}"
+    else
+      domain="localhost"
+    fi
+    set_env "NGINX_SERVER_NAME" "$domain"
+    log "Set NGINX_SERVER_NAME=$domain"
   fi
 
   local admin_secret
@@ -141,7 +148,11 @@ ensure_certs() {
 start_server() {
   cd "$SERVER_DIR"
   log "Starting SGTP server stack via docker compose"
-  docker compose up -d --build
+  if ! docker compose up -d --build; then
+    log "docker compose up failed. Showing flyway logs:"
+    docker compose logs --no-color flyway || true
+    fail "Startup failed (see flyway logs above)"
+  fi
 }
 
 save_bootstrap_credentials() {
@@ -172,14 +183,16 @@ print_summary() {
   local chat_port
   chat_port="$(get_env CHAT_TCP_PORT)"
   chat_port="${chat_port:-250}"
+  local where
+  where="$SERVER_DIR"
 
   cat <<MSG
 
 [install] Done.
 
 Useful commands:
-  cd server && docker compose ps
-  cd server && docker compose logs -f sgtp_chat
+  cd $where && docker compose ps
+  cd $where && docker compose logs -f sgtp_chat
 
 Server endpoints (default):
   SGTP TCP: ${chat_port}
