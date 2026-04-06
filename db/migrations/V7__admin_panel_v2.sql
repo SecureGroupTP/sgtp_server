@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS user_bans (
     unbanned_by   TEXT
 );
 CREATE INDEX idx_user_bans_pubkey ON user_bans (public_key);
-CREATE INDEX idx_user_bans_active ON user_bans (public_key) WHERE unbanned_at IS NULL AND (expires_at IS NULL OR expires_at > now());
+CREATE INDEX idx_user_bans_active ON user_bans (public_key) WHERE unbanned_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS ip_bans (
     id            BIGSERIAL    PRIMARY KEY,
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS ip_bans (
     unbanned_by   TEXT
 );
 CREATE INDEX idx_ip_bans_ip ON ip_bans (ip_address);
-CREATE INDEX idx_ip_bans_active ON ip_bans (ip_address) WHERE unbanned_at IS NULL AND (expires_at IS NULL OR expires_at > now());
+CREATE INDEX idx_ip_bans_active ON ip_bans (ip_address) WHERE unbanned_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS room_bans (
     id            BIGSERIAL    PRIMARY KEY,
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS room_bans (
     unbanned_by   TEXT
 );
 CREATE INDEX idx_room_bans_uuid ON room_bans (room_uuid);
-CREATE INDEX idx_room_bans_active ON room_bans (room_uuid) WHERE unbanned_at IS NULL AND (expires_at IS NULL OR expires_at > now());
+CREATE INDEX idx_room_bans_active ON room_bans (room_uuid) WHERE unbanned_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS user_room_bans (
     id            BIGSERIAL    PRIMARY KEY,
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS user_room_bans (
 );
 CREATE INDEX idx_user_room_bans_pk ON user_room_bans (public_key);
 CREATE INDEX idx_user_room_bans_room ON user_room_bans (room_uuid);
-CREATE INDEX idx_user_room_bans_active ON user_room_bans (public_key, room_uuid) WHERE unbanned_at IS NULL AND (expires_at IS NULL OR expires_at > now());
+CREATE INDEX idx_user_room_bans_active ON user_room_bans (public_key, room_uuid) WHERE unbanned_at IS NULL;
 
 -- ══════════════════════════════════════════════════
 -- Invite links
