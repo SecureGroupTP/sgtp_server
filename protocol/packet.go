@@ -18,7 +18,7 @@ import (
 
 const (
 	// ProtocolVersion is the only supported wire version.
-	ProtocolVersion uint16 = 0x0001
+	ProtocolVersion uint16 = 0x0002
 
 	// HeaderSize is the fixed size of the base header in bytes.
 	HeaderSize = 64
