@@ -588,6 +588,13 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 		} else {
 			r.unicast(fhdr.ReceiverUUID, raw)
 		}
+		if fhdr.PacketType == protocol.TypeMessage {
+			if ackRaw, ok := buildMessageACKFrame(raw, fhdr, senderID); ok {
+				cn.send(ackRaw)
+			} else {
+				s.logger.Printf("[server] [%s] skip MESSAGE_ACK: malformed MESSAGE payload_len=%d", connID, fhdr.PayloadLen)
+			}
+		}
 		if s.policy != nil {
 			s.policy.RecordNetworkUsage(ctx, ip, trackedPubKey, 0, 0, int64(len(raw)), "tcp", "frame_out")
 			s.policy.RecordRoomUsage(ctx, roomIDHex, ip, trackedPubKey, 0, 0, int64(len(raw)), r.count())
@@ -669,4 +676,29 @@ func readRawFrame(r io.Reader) ([]byte, *protocol.Header, error) {
 	raw = append(raw, hdrBuf...)
 	raw = append(raw, rest...)
 	return raw, hdr, nil
+}
+
+// buildMessageACKFrame constructs a MESSAGE_ACK for the incoming MESSAGE frame.
+// ACK payload layout: 16-byte MessageUUID copied from MESSAGE payload[0:16].
+func buildMessageACKFrame(raw []byte, hdr *protocol.Header, receiverID [16]byte) ([]byte, bool) {
+	if hdr == nil || hdr.PacketType != protocol.TypeMessage || len(raw) < protocol.HeaderSize+16 {
+		return nil, false
+	}
+
+	var msgUUID [16]byte
+	copy(msgUUID[:], raw[protocol.HeaderSize:protocol.HeaderSize+16])
+
+	ackHdr := protocol.Header{
+		RoomUUID:     hdr.RoomUUID,
+		ReceiverUUID: receiverID,
+		SenderUUID:   protocol.BroadcastUUID,
+		Version:      protocol.ProtocolVersion,
+		PacketType:   protocol.TypeMessageACK,
+		PayloadLen:   16,
+		Timestamp:    uint64(time.Now().UTC().UnixMilli()),
+	}
+	ackRaw := protocol.MarshalHeader(&ackHdr)
+	ackRaw = append(ackRaw, msgUUID[:]...)
+	ackRaw = append(ackRaw, make([]byte, protocol.SignatureSize)...)
+	return ackRaw, true
 }

@@ -74,6 +74,7 @@ const (
 	TypeFIN              PacketType = 0x0F
 	TypeKickRequest      PacketType = 0x10
 	TypeKicked           PacketType = 0x11
+	TypeMessageACK       PacketType = 0x12
 )
 
 func (t PacketType) String() string {
@@ -85,6 +86,7 @@ func (t PacketType) String() string {
 		TypeStatus: "STATUS", TypeHSIR: "HSIR", TypeHSI: "HSI",
 		TypeHSR: "HSR", TypeHSRA: "HSRA", TypeFIN: "FIN",
 		TypeKickRequest: "KICK_REQUEST", TypeKicked: "KICKED",
+		TypeMessageACK: "MESSAGE_ACK",
 	}
 	if s, ok := names[t]; ok {
 		return s
