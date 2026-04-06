@@ -47,6 +47,7 @@ services:
 
   sgtp_chat:
     container_name: sgtp_chat
+    user: "0:0"
     build: .
     depends_on:
       flyway:
