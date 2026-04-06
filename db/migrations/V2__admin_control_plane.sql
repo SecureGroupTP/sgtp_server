@@ -82,13 +82,13 @@ CREATE TABLE IF NOT EXISTS usage_rollups (
   id bigserial PRIMARY KEY,
   scope text NOT NULL CHECK (scope IN ('ip','public_key')),
   subject text NOT NULL,
-  window text NOT NULL CHECK (window IN ('minute','hour','day','week','month')),
+  window_name text NOT NULL CHECK (window_name IN ('minute','hour','day','week','month')),
   requests bigint NOT NULL,
   bytes_recv bigint NOT NULL,
   bytes_sent bigint NOT NULL,
   sampled_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS usage_rollups_idx ON usage_rollups(scope, subject, window, sampled_at DESC);
+CREATE INDEX IF NOT EXISTS usage_rollups_idx ON usage_rollups(scope, subject, window_name, sampled_at DESC);
 
 CREATE TABLE IF NOT EXISTS client_activity (
   id bigserial PRIMARY KEY,

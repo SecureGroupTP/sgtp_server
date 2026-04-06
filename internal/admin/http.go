@@ -25,6 +25,7 @@ func NewHTTPHandler(svc *Service) *HTTPHandler {
 
 func (h *HTTPHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin", h.handleUI)
+	mux.HandleFunc("GET /admin/", h.handleUI)
 	mux.HandleFunc("POST /admin/auth/login", h.handleLogin)
 	mux.HandleFunc("POST /admin/auth/refresh", h.handleRefresh)
 	mux.HandleFunc("POST /admin/auth/logout", h.requireAuth(h.handleLogout))
@@ -51,15 +52,13 @@ func (h *HTTPHandler) Register(mux *http.ServeMux) {
 }
 
 func (h *HTTPHandler) handleUI(w http.ResponseWriter, _ *http.Request) {
+	page, err := loadUIPage()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "admin ui not found"})
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(`<!doctype html>
-<html><head><meta charset="utf-8"><title>SGTP Admin</title>
-<style>body{font-family:ui-sans-serif,system-ui;margin:30px;max-width:900px}input,button,select,textarea{padding:8px;margin:4px 0;display:block;width:100%}pre{background:#f5f5f5;padding:12px;overflow:auto}</style>
-</head><body>
-<h1>SGTP Admin</h1>
-<p>v1 control panel API is available under <code>/admin/*</code>.</p>
-<p>Use REST endpoints for operations. This page is intentionally minimal for safe ops bootstrap.</p>
-</body></html>`))
+	_, _ = w.Write(page)
 }
 
 func (h *HTTPHandler) requireAuth(next http.HandlerFunc) http.HandlerFunc {

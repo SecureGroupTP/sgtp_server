@@ -1,0 +1,803 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SGTP Admin</title>
+  <style>
+    :root {
+      --bg: #f3f5f7;
+      --panel: #ffffff;
+      --text: #1d232a;
+      --muted: #5d6b7a;
+      --line: #d9e0e7;
+      --accent: #0f6fdf;
+      --accent2: #0a56ad;
+      --danger: #c53b3b;
+      --ok: #1f8f4d;
+      --shadow: 0 8px 24px rgba(16, 36, 58, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at top, #e8f1ff 0%, var(--bg) 40%);
+      color: var(--text);
+      font-family: "Segoe UI", "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+    }
+
+    .wrap {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .title {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .auth {
+      display: none;
+      gap: 8px;
+      align-items: center;
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    .auth.show { display: flex; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 14px;
+    }
+
+    @media (max-width: 980px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+    }
+
+    .nav {
+      padding: 12px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .nav button {
+      width: 100%;
+      text-align: left;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      color: var(--text);
+      padding: 10px 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      font-weight: 600;
+    }
+
+    .nav button:hover { border-color: #b6c6d8; }
+    .nav button.active {
+      background: #e7f0ff;
+      border-color: #99b9ea;
+      color: #104891;
+    }
+
+    .content { padding: 16px; }
+    .section { display: none; }
+    .section.active { display: block; }
+
+    h2 {
+      margin-top: 0;
+      margin-bottom: 10px;
+      font-size: 20px;
+    }
+
+    .sub {
+      margin-top: 0;
+      color: var(--muted);
+      font-size: 14px;
+      margin-bottom: 14px;
+    }
+
+    .row {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 1fr 1fr;
+      margin-bottom: 10px;
+    }
+
+    @media (max-width: 760px) {
+      .row { grid-template-columns: 1fr; }
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+
+    input, select, textarea, button {
+      font: inherit;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: #fff;
+      color: var(--text);
+    }
+
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+      font-family: "Consolas", "SFMono-Regular", Menlo, monospace;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .btns {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 8px 0 14px;
+    }
+
+    button.primary, button.secondary, button.danger {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 14px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    button.primary { background: var(--accent); color: #fff; }
+    button.primary:hover { background: var(--accent2); }
+    button.secondary { background: #edf2f8; color: #334a64; }
+    button.secondary:hover { background: #e2ebf5; }
+    button.danger { background: #f4d6d6; color: #6b1a1a; }
+    button.danger:hover { background: #efc6c6; }
+
+    .status {
+      border-radius: 10px;
+      padding: 9px 12px;
+      font-size: 13px;
+      margin-bottom: 12px;
+      display: none;
+    }
+
+    .status.show { display: block; }
+    .status.ok { background: #e6f6ec; color: #1b6a3d; border: 1px solid #bde2cb; }
+    .status.err { background: #f9e5e5; color: #7f2525; border: 1px solid #edc1c1; }
+
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .table th, .table td {
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      padding: 8px 10px;
+      font-size: 13px;
+      vertical-align: top;
+    }
+
+    .table th { background: #f7fafc; }
+    .small { font-size: 12px; color: var(--muted); }
+    .mono { font-family: "Consolas", "SFMono-Regular", Menlo, monospace; }
+
+    .login {
+      max-width: 460px;
+      margin: 36px auto 0;
+      padding: 18px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+    }
+
+    .app { display: none; }
+    .app.show { display: block; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="title">SGTP Admin Control Panel</div>
+      <div id="authMeta" class="auth">
+        <span id="authInfo"></span>
+        <button class="secondary" id="logoutBtn" type="button">Logout</button>
+      </div>
+    </div>
+
+    <div id="loginBox" class="login">
+      <h2>Admin login</h2>
+      <p class="sub">Use bootstrap root credentials from <code>admin_bootstrap_credentials.txt</code>.</p>
+      <div class="status" id="loginStatus"></div>
+      <label for="loginName">Login name</label>
+      <input id="loginName" autocomplete="username" />
+      <label for="loginPass">Password</label>
+      <input id="loginPass" type="password" autocomplete="current-password" />
+      <div class="btns">
+        <button id="loginBtn" class="primary" type="button">Login</button>
+      </div>
+    </div>
+
+    <div id="app" class="app">
+      <div class="grid">
+        <div class="panel nav" id="nav">
+          <button data-tab="dashboard" class="active">Dashboard</button>
+          <button data-tab="access">Access policy</button>
+          <button data-tab="limits">Limits</button>
+          <button data-tab="network">Network</button>
+          <button data-tab="bans">Bans</button>
+          <button data-tab="backups">Backups</button>
+          <button data-tab="admins">Admins</button>
+          <button data-tab="password">Change password</button>
+        </div>
+
+        <div class="panel content">
+          <div class="status" id="mainStatus"></div>
+
+          <section class="section active" id="tab-dashboard">
+            <h2>Dashboard</h2>
+            <p class="sub">Quick stats from <code>/admin/stats/*</code>.</p>
+            <div class="btns">
+              <button class="primary" id="refreshUsageBtn" type="button">Refresh usage</button>
+              <button class="secondary" id="refreshUsersBtn" type="button">Refresh users</button>
+            </div>
+            <h3>Usage top</h3>
+            <div id="usageWrap"></div>
+            <h3>Users top</h3>
+            <div id="usersWrap"></div>
+          </section>
+
+          <section class="section" id="tab-access">
+            <h2>Access policy</h2>
+            <p class="sub">Modes: <code>open | whitelist | password | key</code> (mutually exclusive).</p>
+            <div class="row">
+              <div>
+                <label for="accessMode">Mode</label>
+                <select id="accessMode">
+                  <option value="open">open</option>
+                  <option value="whitelist">whitelist</option>
+                  <option value="password">password</option>
+                  <option value="key">key</option>
+                </select>
+              </div>
+              <div>
+                <label for="accessPassword">Password (for mode=password)</label>
+                <input id="accessPassword" type="password" placeholder="leave empty to keep current" />
+              </div>
+            </div>
+            <label for="accessKey">Shared key (for mode=key)</label>
+            <input id="accessKey" type="password" placeholder="leave empty to keep current" />
+            <label for="accessWhitelist">Whitelist IPs (one per line)</label>
+            <textarea id="accessWhitelist"></textarea>
+            <div class="btns">
+              <button class="secondary" id="loadAccessBtn" type="button">Load</button>
+              <button class="primary" id="saveAccessBtn" type="button">Save</button>
+            </div>
+          </section>
+
+          <section class="section" id="tab-limits">
+            <h2>Limits</h2>
+            <p class="sub">JSON maps: bucket to max requests.</p>
+            <div class="row">
+              <div>
+                <label for="limitsIp">Per IP JSON</label>
+                <textarea id="limitsIp"></textarea>
+              </div>
+              <div>
+                <label for="limitsPub">Per public_key JSON</label>
+                <textarea id="limitsPub"></textarea>
+              </div>
+            </div>
+            <div class="btns">
+              <button class="secondary" id="loadLimitsBtn" type="button">Load</button>
+              <button class="primary" id="saveLimitsBtn" type="button">Save</button>
+            </div>
+          </section>
+
+          <section class="section" id="tab-network">
+            <h2>Network settings</h2>
+            <p class="sub">Save JSON. Apply with graceful restart after save.</p>
+            <label for="networkJson">Network JSON</label>
+            <textarea id="networkJson"></textarea>
+            <div class="btns">
+              <button class="secondary" id="loadNetworkBtn" type="button">Load</button>
+              <button class="primary" id="saveNetworkBtn" type="button">Save</button>
+            </div>
+          </section>
+
+          <section class="section" id="tab-bans">
+            <h2>Bans</h2>
+            <p class="sub">Create and remove ban rules.</p>
+            <div class="row">
+              <div>
+                <label for="banKind">Kind</label>
+                <select id="banKind">
+                  <option value="ip">ip</option>
+                  <option value="username">username</option>
+                  <option value="public_key">public_key</option>
+                </select>
+              </div>
+              <div>
+                <label for="banValue">Value</label>
+                <input id="banValue" />
+              </div>
+            </div>
+            <div class="row">
+              <div>
+                <label for="banReason">Reason</label>
+                <input id="banReason" />
+              </div>
+              <div>
+                <label for="banExpiresAt">Expires at (RFC3339, optional)</label>
+                <input id="banExpiresAt" placeholder="2026-12-31T23:59:59Z" />
+              </div>
+            </div>
+            <div class="btns">
+              <button class="primary" id="addBanBtn" type="button">Add ban</button>
+              <button class="secondary" id="refreshBansBtn" type="button">Refresh list</button>
+            </div>
+            <div id="bansWrap"></div>
+          </section>
+
+          <section class="section" id="tab-backups">
+            <h2>Backups</h2>
+            <p class="sub">Run and inspect postgres backup jobs.</p>
+            <div class="btns">
+              <button class="primary" id="runBackupBtn" type="button">Run backup</button>
+              <button class="secondary" id="refreshBackupsBtn" type="button">Refresh jobs</button>
+            </div>
+            <div id="backupsWrap"></div>
+          </section>
+
+          <section class="section" id="tab-admins">
+            <h2>Create admin</h2>
+            <p class="sub">Available for root users.</p>
+            <div class="row">
+              <div>
+                <label for="newAdminLogin">Login name</label>
+                <input id="newAdminLogin" />
+              </div>
+              <div>
+                <label for="newAdminDisplay">Display name</label>
+                <input id="newAdminDisplay" />
+              </div>
+            </div>
+            <div class="row">
+              <div>
+                <label for="newAdminPass">Password</label>
+                <input id="newAdminPass" type="password" />
+              </div>
+              <div>
+                <label for="newAdminForce">Force password change on first login</label>
+                <select id="newAdminForce">
+                  <option value="false">false</option>
+                  <option value="true">true</option>
+                </select>
+              </div>
+            </div>
+            <div class="btns">
+              <button class="primary" id="createAdminBtn" type="button">Create admin</button>
+            </div>
+          </section>
+
+          <section class="section" id="tab-password">
+            <h2>Change my password</h2>
+            <label for="newPassword">New password</label>
+            <input id="newPassword" type="password" />
+            <div class="btns">
+              <button class="primary" id="changePasswordBtn" type="button">Change password</button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const state = {
+      accessToken: localStorage.getItem('sgtp_admin_access') || '',
+      refreshToken: localStorage.getItem('sgtp_admin_refresh') || '',
+      user: JSON.parse(localStorage.getItem('sgtp_admin_user') || 'null'),
+    };
+
+    const loginBox = document.getElementById('loginBox');
+    const app = document.getElementById('app');
+    const authMeta = document.getElementById('authMeta');
+    const authInfo = document.getElementById('authInfo');
+
+    function showStatus(elId, message, ok = true) {
+      const el = document.getElementById(elId);
+      el.textContent = message;
+      el.className = 'status show ' + (ok ? 'ok' : 'err');
+      setTimeout(() => {
+        if (el.textContent === message) el.className = 'status';
+      }, 5000);
+    }
+
+    function setAuth(accessToken, refreshToken, user) {
+      state.accessToken = accessToken || '';
+      state.refreshToken = refreshToken || '';
+      state.user = user || null;
+      localStorage.setItem('sgtp_admin_access', state.accessToken);
+      localStorage.setItem('sgtp_admin_refresh', state.refreshToken);
+      localStorage.setItem('sgtp_admin_user', JSON.stringify(state.user));
+      updateAuthView();
+    }
+
+    function clearAuth() {
+      setAuth('', '', null);
+    }
+
+    function updateAuthView() {
+      const logged = !!state.accessToken;
+      loginBox.style.display = logged ? 'none' : 'block';
+      app.classList.toggle('show', logged);
+      authMeta.classList.toggle('show', logged);
+      authInfo.textContent = state.user ? (state.user.login_name + ' (' + state.user.role + ')') : 'logged in';
+    }
+
+    async function tryRefresh() {
+      if (!state.refreshToken) return false;
+      const res = await fetch('/admin/auth/refresh', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ refresh_token: state.refreshToken }),
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      setAuth(data.access_token, state.refreshToken, data.user || state.user);
+      return true;
+    }
+
+    async function api(path, options = {}, retry = true) {
+      const init = { ...options };
+      init.headers = { ...(options.headers || {}) };
+      if (state.accessToken) {
+        init.headers['Authorization'] = 'Bearer ' + state.accessToken;
+      }
+      if (init.body && typeof init.body !== 'string' && !(init.body instanceof FormData)) {
+        init.headers['Content-Type'] = 'application/json';
+        init.body = JSON.stringify(init.body);
+      }
+
+      let res = await fetch(path, init);
+      if (res.status === 401 && retry && await tryRefresh()) {
+        return api(path, options, false);
+      }
+      if (!res.ok) {
+        let msg = 'HTTP ' + res.status;
+        try {
+          const err = await res.json();
+          if (err && err.error) msg = err.error;
+        } catch (_) {}
+        throw new Error(msg);
+      }
+      const ct = res.headers.get('content-type') || '';
+      if (ct.includes('application/json')) return res.json();
+      return res.text();
+    }
+
+    function tableFromRows(headers, rows) {
+      const thead = '<tr>' + headers.map((h) => '<th>' + h + '</th>').join('') + '</tr>';
+      const tbody = rows.length
+        ? rows.map((row) => '<tr>' + row.map((v) => '<td>' + (v ?? '') + '</td>').join('') + '</tr>').join('')
+        : '<tr><td colspan="' + headers.length + '" class="small">No data</td></tr>';
+      return '<table class="table"><thead>' + thead + '</thead><tbody>' + tbody + '</tbody></table>';
+    }
+
+    function jsonPretty(v) {
+      return JSON.stringify(v || {}, null, 2);
+    }
+
+    function bindNav() {
+      document.querySelectorAll('#nav button').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('#nav button').forEach((x) => x.classList.remove('active'));
+          btn.classList.add('active');
+          const tab = btn.dataset.tab;
+          document.querySelectorAll('.section').forEach((s) => s.classList.remove('active'));
+          document.getElementById('tab-' + tab).classList.add('active');
+        });
+      });
+    }
+
+    async function loadUsage() {
+      const data = await api('/admin/stats/usage?limit=20');
+      const rows = data.map((x) => [
+        '<span class="mono">' + x.ip + '</span>',
+        '<span class="mono">' + (x.public_key || '') + '</span>',
+        x.requests,
+        x.bytes_recv,
+        x.bytes_sent,
+        x.transport,
+        x.last_status,
+      ]);
+      document.getElementById('usageWrap').innerHTML = tableFromRows(
+        ['IP', 'Public key', 'Requests', 'Bytes recv', 'Bytes sent', 'Transport', 'Status'], rows
+      );
+    }
+
+    async function loadUsers() {
+      const data = await api('/admin/stats/users?limit=20');
+      const rows = data.map((x) => [
+        '<span class="mono">' + x.ip + '</span>',
+        '<span class="mono">' + (x.public_key || '') + '</span>',
+        x.requests,
+        x.last_use,
+      ]);
+      document.getElementById('usersWrap').innerHTML = tableFromRows(
+        ['IP', 'Public key', 'Requests', 'Last use'], rows
+      );
+    }
+
+    async function loadAccess() {
+      const p = await api('/admin/settings/access');
+      document.getElementById('accessMode').value = p.mode || 'open';
+      document.getElementById('accessWhitelist').value = (p.whitelist || []).join('\n');
+      document.getElementById('accessPassword').value = '';
+      document.getElementById('accessKey').value = '';
+    }
+
+    async function saveAccess() {
+      const mode = document.getElementById('accessMode').value;
+      const whitelist = document.getElementById('accessWhitelist').value
+        .split('\n').map((x) => x.trim()).filter(Boolean);
+      const password = document.getElementById('accessPassword').value.trim();
+      const sharedKey = document.getElementById('accessKey').value.trim();
+      await api('/admin/settings/access', {
+        method: 'PUT',
+        body: { mode, whitelist, password, shared_key: sharedKey },
+      });
+      showStatus('mainStatus', 'Access policy saved', true);
+      document.getElementById('accessPassword').value = '';
+      document.getElementById('accessKey').value = '';
+    }
+
+    async function loadLimits() {
+      const limits = await api('/admin/limits');
+      document.getElementById('limitsIp').value = jsonPretty(limits.per_ip || {});
+      document.getElementById('limitsPub').value = jsonPretty(limits.per_pubkey || {});
+    }
+
+    async function saveLimits() {
+      const perIp = JSON.parse(document.getElementById('limitsIp').value || '{}');
+      const perPub = JSON.parse(document.getElementById('limitsPub').value || '{}');
+      await api('/admin/limits', {
+        method: 'PUT',
+        body: { per_ip: perIp, per_pubkey: perPub },
+      });
+      showStatus('mainStatus', 'Limits saved', true);
+    }
+
+    async function loadNetwork() {
+      const net = await api('/admin/settings/network');
+      document.getElementById('networkJson').value = jsonPretty(net);
+    }
+
+    async function saveNetwork() {
+      const body = JSON.parse(document.getElementById('networkJson').value || '{}');
+      await api('/admin/settings/network', { method: 'PUT', body });
+      showStatus('mainStatus', 'Network settings saved. Restart sgtp_chat to apply.', true);
+    }
+
+    async function loadBans() {
+      const data = await api('/admin/bans');
+      const rows = data.map((b) => [
+        b.id,
+        b.kind,
+        '<span class="mono">' + b.value + '</span>',
+        b.reason || '',
+        b.expires_at || '',
+        b.created_at || '',
+        '<button class="danger" data-del-ban="' + b.id + '">Delete</button>',
+      ]);
+      document.getElementById('bansWrap').innerHTML = tableFromRows(
+        ['ID', 'Kind', 'Value', 'Reason', 'Expires', 'Created', 'Action'], rows
+      );
+      document.querySelectorAll('[data-del-ban]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const id = btn.getAttribute('data-del-ban');
+          await api('/admin/bans?id=' + encodeURIComponent(id), { method: 'DELETE' });
+          showStatus('mainStatus', 'Ban deleted', true);
+          await loadBans();
+        });
+      });
+    }
+
+    async function addBan() {
+      const kind = document.getElementById('banKind').value;
+      const value = document.getElementById('banValue').value.trim();
+      const reason = document.getElementById('banReason').value.trim();
+      const expiresAt = document.getElementById('banExpiresAt').value.trim();
+      if (!value) throw new Error('ban value is required');
+      await api('/admin/bans', {
+        method: 'POST',
+        body: {
+          kind,
+          value,
+          reason,
+          expires_at: expiresAt || null,
+        },
+      });
+      showStatus('mainStatus', 'Ban added', true);
+      document.getElementById('banValue').value = '';
+      document.getElementById('banReason').value = '';
+      document.getElementById('banExpiresAt').value = '';
+      await loadBans();
+    }
+
+    async function loadBackups() {
+      const data = await api('/admin/backups?limit=30');
+      const rows = data.map((b) => [
+        b.id,
+        b.status,
+        b.output_path || '',
+        b.started_at || '',
+        b.finished_at || '',
+        b.error_message || '',
+      ]);
+      document.getElementById('backupsWrap').innerHTML = tableFromRows(
+        ['ID', 'Status', 'Output', 'Started', 'Finished', 'Error'], rows
+      );
+    }
+
+    async function runBackup() {
+      const res = await api('/admin/backups/run', { method: 'POST' });
+      showStatus('mainStatus', 'Backup job queued: #' + res.job_id, true);
+      await loadBackups();
+    }
+
+    async function createAdmin() {
+      const login = document.getElementById('newAdminLogin').value.trim();
+      const display = document.getElementById('newAdminDisplay').value.trim();
+      const pass = document.getElementById('newAdminPass').value;
+      const force = document.getElementById('newAdminForce').value === 'true';
+      if (!login || !pass) throw new Error('login and password are required');
+      await api('/admin/users', {
+        method: 'POST',
+        body: {
+          login_name: login,
+          display_name: display || login,
+          password: pass,
+          force_password_change: force,
+        },
+      });
+      showStatus('mainStatus', 'Admin user created', true);
+      document.getElementById('newAdminLogin').value = '';
+      document.getElementById('newAdminDisplay').value = '';
+      document.getElementById('newAdminPass').value = '';
+    }
+
+    async function changePassword() {
+      const p = document.getElementById('newPassword').value;
+      if (!p) throw new Error('new password is required');
+      await api('/admin/users/change-password', {
+        method: 'POST',
+        body: { new_password: p },
+      });
+      document.getElementById('newPassword').value = '';
+      showStatus('mainStatus', 'Password changed', true);
+    }
+
+    async function doLogin() {
+      const loginName = document.getElementById('loginName').value.trim();
+      const password = document.getElementById('loginPass').value;
+      if (!loginName || !password) {
+        showStatus('loginStatus', 'login_name and password are required', false);
+        return;
+      }
+      try {
+        const data = await fetch('/admin/auth/login', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ login_name: loginName, password }),
+        }).then(async (res) => {
+          if (!res.ok) {
+            let msg = 'login failed';
+            try { msg = (await res.json()).error || msg; } catch (_) {}
+            throw new Error(msg);
+          }
+          return res.json();
+        });
+        setAuth(data.access_token, data.refresh_token, data.user);
+        document.getElementById('loginPass').value = '';
+        showStatus('mainStatus', 'Logged in', true);
+        await bootstrapData();
+      } catch (err) {
+        showStatus('loginStatus', String(err.message || err), false);
+      }
+    }
+
+    async function doLogout() {
+      try {
+        if (state.refreshToken) {
+          await api('/admin/auth/logout', { method: 'POST', body: { refresh_token: state.refreshToken } });
+        }
+      } catch (_) {}
+      clearAuth();
+      updateAuthView();
+    }
+
+    async function bootstrapData() {
+      await Promise.allSettled([loadUsage(), loadUsers(), loadAccess(), loadLimits(), loadNetwork(), loadBans(), loadBackups()]);
+    }
+
+    function bindEvents() {
+      bindNav();
+      document.getElementById('loginBtn').addEventListener('click', doLogin);
+      document.getElementById('logoutBtn').addEventListener('click', doLogout);
+
+      document.getElementById('refreshUsageBtn').addEventListener('click', () => runSafe(loadUsage));
+      document.getElementById('refreshUsersBtn').addEventListener('click', () => runSafe(loadUsers));
+
+      document.getElementById('loadAccessBtn').addEventListener('click', () => runSafe(loadAccess));
+      document.getElementById('saveAccessBtn').addEventListener('click', () => runSafe(saveAccess));
+
+      document.getElementById('loadLimitsBtn').addEventListener('click', () => runSafe(loadLimits));
+      document.getElementById('saveLimitsBtn').addEventListener('click', () => runSafe(saveLimits));
+
+      document.getElementById('loadNetworkBtn').addEventListener('click', () => runSafe(loadNetwork));
+      document.getElementById('saveNetworkBtn').addEventListener('click', () => runSafe(saveNetwork));
+
+      document.getElementById('addBanBtn').addEventListener('click', () => runSafe(addBan));
+      document.getElementById('refreshBansBtn').addEventListener('click', () => runSafe(loadBans));
+
+      document.getElementById('runBackupBtn').addEventListener('click', () => runSafe(runBackup));
+      document.getElementById('refreshBackupsBtn').addEventListener('click', () => runSafe(loadBackups));
+
+      document.getElementById('createAdminBtn').addEventListener('click', () => runSafe(createAdmin));
+      document.getElementById('changePasswordBtn').addEventListener('click', () => runSafe(changePassword));
+
+      document.getElementById('loginPass').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') doLogin();
+      });
+    }
+
+    async function runSafe(fn) {
+      try {
+        await fn();
+      } catch (err) {
+        showStatus('mainStatus', String(err.message || err), false);
+      }
+    }
+
+    (async function init() {
+      bindEvents();
+      updateAuthView();
+      if (state.accessToken) {
+        await bootstrapData();
+      }
+    })();
+  </script>
+</body>
+</html>
