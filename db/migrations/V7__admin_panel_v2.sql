@@ -121,17 +121,21 @@ CREATE TABLE IF NOT EXISTS trusted_ips (
 -- Extend client_activity with user profile fields (for API v1)
 -- ══════════════════════════════════════════════════
 
--- Add user-level traffic/rate limits columns to userdir_profiles if not exists
+-- Add user-level traffic/rate limits columns to userdir_profiles if table exists
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='userdir_profiles' AND column_name='traffic_limit_bytes') THEN
-        ALTER TABLE userdir_profiles ADD COLUMN traffic_limit_bytes BIGINT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='userdir_profiles' AND column_name='traffic_limit_period') THEN
-        ALTER TABLE userdir_profiles ADD COLUMN traffic_limit_period TEXT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='userdir_profiles' AND column_name='request_rate_limit') THEN
-        ALTER TABLE userdir_profiles ADD COLUMN request_rate_limit INT;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='userdir_profiles') THEN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='userdir_profiles' AND column_name='traffic_limit_bytes') THEN
+            ALTER TABLE userdir_profiles ADD COLUMN traffic_limit_bytes BIGINT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='userdir_profiles' AND column_name='traffic_limit_period') THEN
+            ALTER TABLE userdir_profiles ADD COLUMN traffic_limit_period TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='userdir_profiles' AND column_name='request_rate_limit') THEN
+            ALTER TABLE userdir_profiles ADD COLUMN request_rate_limit INT;
+        END IF;
+    ELSE
+        RAISE NOTICE 'Table userdir_profiles does not exist; skipping per-user traffic/rate limit columns';
     END IF;
 END $$;
 
