@@ -40,6 +40,13 @@ type UsageLimits struct {
 	PerPubKey map[string]int64 `json:"per_pubkey"`
 }
 
+type WindowLimit struct {
+	Requests int64 `json:"requests"`
+	Bytes    int64 `json:"bytes"`
+}
+
+type SubjectLimits map[string]WindowLimit
+
 type BanRule struct {
 	ID        int64      `json:"id"`
 	Kind      string     `json:"kind"`

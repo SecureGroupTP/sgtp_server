@@ -235,29 +235,29 @@ func (s *Store) PutUsageLimits(ctx context.Context, l UsageLimits) error {
 	return err
 }
 
-func (s *Store) GetSubjectLimits(ctx context.Context, scope, subject string) (map[string]int64, error) {
+func (s *Store) GetSubjectLimits(ctx context.Context, scope, subject string) (SubjectLimits, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT limits_json FROM usage_subject_limits WHERE scope=$1 AND subject=$2`, scope, subject)
 	var raw []byte
 	if err := row.Scan(&raw); err != nil {
 		if err == sql.ErrNoRows {
-			return map[string]int64{}, nil
+			return SubjectLimits{}, nil
 		}
 		return nil, err
 	}
-	out := map[string]int64{}
+	out := SubjectLimits{}
 	_ = json.Unmarshal(raw, &out)
 	return out, nil
 }
 
-func (s *Store) PutSubjectLimits(ctx context.Context, scope, subject string, limits map[string]int64) error {
-	if scope != "ip" && scope != "public_key" {
+func (s *Store) PutSubjectLimits(ctx context.Context, scope, subject string, limits SubjectLimits) error {
+	if scope != "ip" && scope != "public_key" && scope != "room" && scope != "global" {
 		return fmt.Errorf("invalid scope")
 	}
 	if strings.TrimSpace(subject) == "" {
 		return fmt.Errorf("subject is empty")
 	}
 	if limits == nil {
-		limits = map[string]int64{}
+		limits = SubjectLimits{}
 	}
 	raw, err := json.Marshal(limits)
 	if err != nil {
@@ -268,7 +268,28 @@ INSERT INTO usage_subject_limits (scope, subject, limits_json, updated_at)
 VALUES ($1,$2,$3,now())
 ON CONFLICT (scope, subject)
 DO UPDATE SET limits_json=EXCLUDED.limits_json, updated_at=now()
-`, scope, subject, raw)
+	`, scope, subject, raw)
+	return err
+}
+
+func (s *Store) GetGlobalLimits(ctx context.Context) (SubjectLimits, error) {
+	return s.GetSubjectLimits(ctx, "global", "*")
+}
+
+func (s *Store) PutGlobalLimits(ctx context.Context, limits SubjectLimits) error {
+	if limits == nil {
+		limits = SubjectLimits{}
+	}
+	raw, err := json.Marshal(limits)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
+INSERT INTO usage_subject_limits (scope, subject, limits_json, updated_at)
+VALUES ('global','*',$1,now())
+ON CONFLICT (scope, subject)
+DO UPDATE SET limits_json=EXCLUDED.limits_json, updated_at=now()
+`, raw)
 	return err
 }
 
@@ -535,6 +556,164 @@ LIMIT $4 OFFSET $5
 		})
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) GetUserDetails(ctx context.Context, userKey string) (map[string]any, error) {
+	q := `
+WITH grouped AS (
+  SELECT
+    CASE WHEN COALESCE(public_key,'') <> '' THEN COALESCE(public_key,'')
+         ELSE CONCAT('ip:', ip) END AS user_key,
+    COALESCE(NULLIF(public_key,''), '') AS public_key,
+    STRING_AGG(DISTINCT ip, ', ' ORDER BY ip) AS ips,
+    MIN(first_use) AS first_use,
+    MAX(last_use) AS last_use,
+    SUM(requests) AS requests,
+    SUM(bytes_recv) AS bytes_recv,
+    SUM(bytes_sent) AS bytes_sent,
+    (SUM(bytes_recv) + SUM(bytes_sent)) AS summary_data
+  FROM client_activity
+  GROUP BY
+    CASE WHEN COALESCE(public_key,'') <> '' THEN COALESCE(public_key,'')
+         ELSE CONCAT('ip:', ip) END,
+    COALESCE(NULLIF(public_key,''), '')
+)
+SELECT user_key, public_key, ips, first_use, last_use, requests, bytes_recv, bytes_sent, summary_data
+FROM grouped
+WHERE user_key = $1
+LIMIT 1
+`
+	row := s.db.QueryRowContext(ctx, q, userKey)
+	var out map[string]any
+	{
+		var k, pub, ips string
+		var first, last time.Time
+		var req, br, bs, sum int64
+		if err := row.Scan(&k, &pub, &ips, &first, &last, &req, &br, &bs, &sum); err != nil {
+			return nil, err
+		}
+		out = map[string]any{
+			"user_key":     k,
+			"public_key":   pub,
+			"ips":          ips,
+			"first_use":    first,
+			"last_use":     last,
+			"requests":     req,
+			"bytes_recv":   br,
+			"bytes_sent":   bs,
+			"summary_data": sum,
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) UpsertRoomActivity(ctx context.Context, roomID string, req, bytesRecv, bytesSent int64, members int) error {
+	if strings.TrimSpace(roomID) == "" {
+		return nil
+	}
+	if members < 0 {
+		members = 0
+	}
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO room_activity (room_id, first_use, last_use, requests, bytes_recv, bytes_sent, current_members, updated_at)
+VALUES ($1,now(),now(),$2,$3,$4,$5,now())
+ON CONFLICT (room_id)
+DO UPDATE SET
+  last_use=now(),
+  requests=room_activity.requests + EXCLUDED.requests,
+  bytes_recv=room_activity.bytes_recv + EXCLUDED.bytes_recv,
+  bytes_sent=room_activity.bytes_sent + EXCLUDED.bytes_sent,
+  current_members=EXCLUDED.current_members,
+  updated_at=now()
+`, roomID, req, bytesRecv, bytesSent, members)
+	return err
+}
+
+func (s *Store) ListRoomsDetailed(ctx context.Context, search, sortBy, sortOrder string, limit, offset int) ([]map[string]any, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	sortColumn := map[string]string{
+		"requests":     "requests",
+		"bytes_recv":   "bytes_recv",
+		"bytes_sent":   "bytes_sent",
+		"summary_data": "summary_data",
+		"first_use":    "first_use",
+		"last_use":     "last_use",
+		"room_id":      "room_id",
+	}[strings.ToLower(strings.TrimSpace(sortBy))]
+	if sortColumn == "" {
+		sortColumn = "requests"
+	}
+	order := "DESC"
+	if strings.EqualFold(strings.TrimSpace(sortOrder), "asc") {
+		order = "ASC"
+	}
+	q := fmt.Sprintf(`
+SELECT room_id, first_use, last_use, requests, bytes_recv, bytes_sent, (bytes_recv + bytes_sent) AS summary_data, current_members
+FROM room_activity
+WHERE ($1 = '' OR room_id ILIKE $1)
+ORDER BY %s %s, last_use DESC
+LIMIT $2 OFFSET $3
+`, sortColumn, order)
+	rows, err := s.db.QueryContext(ctx, q, likePattern(search), limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]map[string]any, 0, limit)
+	for rows.Next() {
+		var roomID string
+		var first, last time.Time
+		var req, br, bs, sum int64
+		var members int
+		if err := rows.Scan(&roomID, &first, &last, &req, &br, &bs, &sum, &members); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{
+			"room_id":         roomID,
+			"first_use":       first,
+			"last_use":        last,
+			"requests":        req,
+			"bytes_recv":      br,
+			"bytes_sent":      bs,
+			"summary_data":    sum,
+			"current_members": members,
+		})
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetRoomDetails(ctx context.Context, roomID string) (map[string]any, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT room_id, first_use, last_use, requests, bytes_recv, bytes_sent, (bytes_recv + bytes_sent) AS summary_data, current_members
+FROM room_activity
+WHERE room_id = $1
+LIMIT 1
+`, roomID)
+	var first, last time.Time
+	var req, br, bs, sum int64
+	var members int
+	var outID string
+	if err := row.Scan(&outID, &first, &last, &req, &br, &bs, &sum, &members); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"room_id":         outID,
+		"first_use":       first,
+		"last_use":        last,
+		"requests":        req,
+		"bytes_recv":      br,
+		"bytes_sent":      bs,
+		"summary_data":    sum,
+		"current_members": members,
+	}, nil
 }
 
 func (s *Store) UpsertClientActivity(ctx context.Context, ip, pubkey string, req, bytesRecv, bytesSent int64, transport, status string) error {

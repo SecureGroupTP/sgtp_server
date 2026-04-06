@@ -258,6 +258,7 @@
           <button data-tab="bans">Bans</button>
           <button data-tab="backups">Backups</button>
           <button data-tab="users">Users</button>
+          <button data-tab="rooms">Rooms</button>
           <button data-tab="admins">Admins</button>
           <button data-tab="password">Change password</button>
         </div>
@@ -308,7 +309,7 @@
 
           <section class="section" id="tab-limits">
             <h2>Limits</h2>
-            <p class="sub">JSON maps: bucket to max requests.</p>
+            <p class="sub">Default per-IP/per-public_key request limits and global request/traffic limits.</p>
             <div class="row">
               <div>
                 <label for="limitsIp">Per IP JSON</label>
@@ -322,6 +323,21 @@
             <div class="btns">
               <button class="secondary" id="loadLimitsBtn" type="button">Load</button>
               <button class="primary" id="saveLimitsBtn" type="button">Save</button>
+            </div>
+            <h3>Global limits (all users)</h3>
+            <div class="row">
+              <div>
+                <label for="globalLimitRequests">Requests limits JSON by window</label>
+                <textarea id="globalLimitRequests">{\n  \"minute\": 0,\n  \"hour\": 0,\n  \"day\": 0,\n  \"week\": 0,\n  \"month\": 0\n}</textarea>
+              </div>
+              <div>
+                <label for="globalLimitBytes">Traffic limits JSON by window (bytes)</label>
+                <textarea id="globalLimitBytes">{\n  \"minute\": 0,\n  \"hour\": 0,\n  \"day\": 0,\n  \"week\": 0,\n  \"month\": 0\n}</textarea>
+              </div>
+            </div>
+            <div class="btns">
+              <button class="secondary" id="loadGlobalLimitBtn" type="button">Load global limits</button>
+              <button class="primary" id="saveGlobalLimitBtn" type="button">Save global limits</button>
             </div>
           </section>
 
@@ -346,6 +362,7 @@
                   <option value="ip">ip</option>
                   <option value="username">username</option>
                   <option value="public_key">public_key</option>
+                  <option value="room">room</option>
                 </select>
               </div>
               <div>
@@ -360,7 +377,7 @@
               </div>
               <div>
                 <label for="banExpiresAt">Expires at (RFC3339, optional)</label>
-                <input id="banExpiresAt" placeholder="2026-12-31T23:59:59Z" />
+                <input id="banExpiresAt" type="datetime-local" />
               </div>
             </div>
             <div class="btns">
@@ -427,6 +444,91 @@
               <button class="primary" id="refreshUsersListBtn" type="button">Search users</button>
             </div>
             <div id="usersListWrap"></div>
+            <h3>User info</h3>
+            <div id="userInfoWrap" class="small">Select user from table.</div>
+            <h3>User limit editor</h3>
+            <div class="row">
+              <div>
+                <label for="userLimitScope">Scope</label>
+                <select id="userLimitScope">
+                  <option value="ip">ip</option>
+                  <option value="public_key">public_key</option>
+                </select>
+              </div>
+              <div>
+                <label for="userLimitSubject">Subject</label>
+                <input id="userLimitSubject" placeholder="ip or public key" />
+              </div>
+            </div>
+            <div class="row">
+              <div>
+                <label for="userLimitRequests">Requests limits JSON by window</label>
+                <textarea id="userLimitRequests">{\n  \"minute\": 0,\n  \"hour\": 0,\n  \"day\": 0,\n  \"week\": 0,\n  \"month\": 0\n}</textarea>
+              </div>
+              <div>
+                <label for="userLimitBytes">Traffic limits JSON by window (bytes)</label>
+                <textarea id="userLimitBytes">{\n  \"minute\": 0,\n  \"hour\": 0,\n  \"day\": 0,\n  \"week\": 0,\n  \"month\": 0\n}</textarea>
+              </div>
+            </div>
+            <div class="btns">
+              <button class="secondary" id="loadUserLimitBtn" type="button">Load user limit</button>
+              <button class="primary" id="saveUserLimitBtn" type="button">Save user limit</button>
+            </div>
+          </section>
+
+          <section class="section" id="tab-rooms">
+            <h2>Rooms</h2>
+            <p class="sub">Traffic and request analytics with ban/limit controls per room.</p>
+            <div class="row">
+              <div>
+                <label for="roomsSearch">Search room</label>
+                <input id="roomsSearch" placeholder="room id..." />
+              </div>
+              <div>
+                <label for="roomsSort">Sort by</label>
+                <select id="roomsSort">
+                  <option value="requests">requests</option>
+                  <option value="bytes_recv">bytes_recv</option>
+                  <option value="bytes_sent">bytes_sent</option>
+                  <option value="summary_data">summary_data</option>
+                  <option value="first_use">first_use</option>
+                  <option value="last_use">last_use</option>
+                </select>
+              </div>
+            </div>
+            <div class="row">
+              <div>
+                <label for="roomsOrder">Order</label>
+                <select id="roomsOrder"><option value="desc">desc</option><option value="asc">asc</option></select>
+              </div>
+              <div>
+                <label for="roomsLimit">Limit</label>
+                <input id="roomsLimit" type="number" value="50" min="1" max="500" />
+              </div>
+            </div>
+            <div class="btns">
+              <button class="primary" id="refreshRoomsBtn" type="button">Search rooms</button>
+            </div>
+            <div id="roomsWrap"></div>
+            <h3>Room info</h3>
+            <div id="roomInfoWrap" class="small">Select room from table.</div>
+            <h3>Room limit editor</h3>
+            <label for="roomLimitRoomId">Room ID</label>
+            <input id="roomLimitRoomId" />
+            <div class="row">
+              <div>
+                <label for="roomLimitRequests">Requests limits JSON by window</label>
+                <textarea id="roomLimitRequests">{\n  \"minute\": 0,\n  \"hour\": 0,\n  \"day\": 0,\n  \"week\": 0,\n  \"month\": 0\n}</textarea>
+              </div>
+              <div>
+                <label for="roomLimitBytes">Traffic limits JSON by window (bytes)</label>
+                <textarea id="roomLimitBytes">{\n  \"minute\": 0,\n  \"hour\": 0,\n  \"day\": 0,\n  \"week\": 0,\n  \"month\": 0\n}</textarea>
+              </div>
+            </div>
+            <div class="btns">
+              <button class="secondary" id="loadRoomLimitBtn" type="button">Load room limit</button>
+              <button class="primary" id="saveRoomLimitBtn" type="button">Save room limit</button>
+            </div>
           </section>
 
           <section class="section" id="tab-admins">
@@ -569,6 +671,56 @@
       return JSON.stringify(v || {}, null, 2);
     }
 
+    function formatBytes(v) {
+      const n = Number(v || 0);
+      if (!Number.isFinite(n) || n <= 0) return '0 B';
+      const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+      let x = n;
+      let i = 0;
+      while (x >= 1024 && i < units.length - 1) {
+        x /= 1024;
+        i++;
+      }
+      return x.toFixed(i === 0 ? 0 : 2) + ' ' + units[i];
+    }
+
+    function toISODateTimeLocal(value) {
+      if (!value) return '';
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return '';
+      const pad = (n) => String(n).padStart(2, '0');
+      return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    }
+
+    function fromDateTimeLocalToISO(value) {
+      if (!value) return null;
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return null;
+      return d.toISOString();
+    }
+
+    function buildWindowLimits(reqMap, bytesMap) {
+      const out = {};
+      ['minute', 'hour', 'day', 'week', 'month'].forEach((w) => {
+        out[w] = {
+          requests: Number(reqMap[w] || 0),
+          bytes: Number(bytesMap[w] || 0),
+        };
+      });
+      return out;
+    }
+
+    function splitWindowLimits(limits) {
+      const req = {minute: 0, hour: 0, day: 0, week: 0, month: 0};
+      const bytes = {minute: 0, hour: 0, day: 0, week: 0, month: 0};
+      ['minute', 'hour', 'day', 'week', 'month'].forEach((w) => {
+        const v = (limits || {})[w] || {};
+        req[w] = Number(v.requests || 0);
+        bytes[w] = Number(v.bytes || 0);
+      });
+      return {req, bytes};
+    }
+
     function bindNav() {
       document.querySelectorAll('#nav button').forEach((btn) => {
         btn.addEventListener('click', () => {
@@ -581,20 +733,70 @@
       });
     }
 
+    function openTab(tab) {
+      document.querySelectorAll('#nav button').forEach((x) => x.classList.remove('active'));
+      const btn = document.querySelector('#nav button[data-tab="' + tab + '"]');
+      if (btn) btn.classList.add('active');
+      document.querySelectorAll('.section').forEach((s) => s.classList.remove('active'));
+      const section = document.getElementById('tab-' + tab);
+      if (section) section.classList.add('active');
+    }
+
+    function bindQuickActionButtons() {
+      document.querySelectorAll('[data-go-ban-kind]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const kind = btn.getAttribute('data-go-ban-kind');
+          const value = btn.getAttribute('data-go-ban-value');
+          openTab('bans');
+          document.getElementById('banKind').value = kind;
+          document.getElementById('banValue').value = value || '';
+          document.getElementById('banReason').focus();
+        });
+      });
+      document.querySelectorAll('[data-go-limit-scope]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const scope = btn.getAttribute('data-go-limit-scope');
+          const subject = btn.getAttribute('data-go-limit-subject');
+          openTab('users');
+          document.getElementById('userLimitScope').value = scope || 'ip';
+          document.getElementById('userLimitSubject').value = subject || '';
+        });
+      });
+      document.querySelectorAll('[data-go-room-ban]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const roomID = btn.getAttribute('data-go-room-ban');
+          openTab('bans');
+          document.getElementById('banKind').value = 'room';
+          document.getElementById('banValue').value = roomID || '';
+          document.getElementById('banReason').focus();
+        });
+      });
+      document.querySelectorAll('[data-go-room-limit]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const roomID = btn.getAttribute('data-go-room-limit');
+          openTab('rooms');
+          document.getElementById('roomLimitRoomId').value = roomID || '';
+        });
+      });
+    }
+
     async function loadUsage() {
       const data = await api('/admin/stats/usage?limit=20');
       const rows = data.map((x) => [
         '<span class="mono">' + x.ip + '</span>',
         '<span class="mono">' + (x.public_key || '') + '</span>',
         x.requests,
-        x.bytes_recv,
-        x.bytes_sent,
+        formatBytes(x.bytes_recv),
+        formatBytes(x.bytes_sent),
         x.transport,
         x.last_status,
+        '<button class="secondary" data-go-ban-kind="ip" data-go-ban-value="' + escapeAttr(x.ip) + '">Ban</button> ' +
+        '<button class="secondary" data-go-limit-scope="ip" data-go-limit-subject="' + escapeAttr(x.ip) + '">Limit</button>',
       ]);
       document.getElementById('usageWrap').innerHTML = tableFromRows(
-        ['IP', 'Public key', 'Requests', 'Bytes recv', 'Bytes sent', 'Transport', 'Status'], rows
+        ['IP', 'Public key', 'Requests', 'Bytes recv', 'Bytes sent', 'Transport', 'Status', 'Actions'], rows
       );
+      bindQuickActionButtons();
     }
 
     async function loadUsers() {
@@ -604,13 +806,20 @@
         '<span class="mono">' + (x.public_key || '') + '</span>',
         '<span class="mono">' + (x.ips || '') + '</span>',
         x.requests,
-        x.bytes_recv,
-        x.bytes_sent,
+        formatBytes(x.bytes_recv),
+        formatBytes(x.bytes_sent),
         x.last_use,
+        '<button class="secondary" data-open-user="' + escapeAttr(x.user_key || '') + '">Info</button> ' +
+        (x.public_key ? '<button class="secondary" data-go-ban-kind="public_key" data-go-ban-value="' + escapeAttr(x.public_key) + '">Ban</button> ' : '') +
+        (x.public_key ? '<button class="secondary" data-go-limit-scope="public_key" data-go-limit-subject="' + escapeAttr(x.public_key) + '">Limit</button>' : ''),
       ]);
       document.getElementById('usersWrap').innerHTML = tableFromRows(
-        ['User key', 'Public key', 'IPs', 'Requests', 'Bytes recv', 'Bytes sent', 'Last use'], rows
+        ['User key', 'Public key', 'IPs', 'Requests', 'Bytes recv', 'Bytes sent', 'Last use', 'Actions'], rows
       );
+      bindQuickActionButtons();
+      document.querySelectorAll('[data-open-user]').forEach((btn) => {
+        btn.addEventListener('click', () => runSafe(() => openUserDetails(btn.getAttribute('data-open-user'))));
+      });
     }
 
     async function loadUsersList() {
@@ -625,26 +834,27 @@
       });
       const data = await api('/admin/users/list?' + q.toString());
       const rows = (data.items || []).map((x) => {
-        const banIpBtn = x.ips
-          ? '<button class="danger" data-ban-kind="ip" data-ban-value="' + escapeAttr(x.ips.split(',')[0].trim()) + '">Ban first IP</button>'
+        const firstIP = (x.ips || '').split(',')[0].trim();
+        const banIpBtn = firstIP
+          ? '<button class="secondary" data-go-ban-kind="ip" data-go-ban-value="' + escapeAttr(firstIP) + '">Ban IP</button>'
           : '';
         const banPubBtn = x.public_key
-          ? '<button class="danger" data-ban-kind="public_key" data-ban-value="' + escapeAttr(x.public_key) + '">Ban pubkey</button>'
+          ? '<button class="secondary" data-go-ban-kind="public_key" data-go-ban-value="' + escapeAttr(x.public_key) + '">Ban pubkey</button>'
           : '';
-        const limitIpBtn = x.ips
-          ? '<button class="secondary" data-limit-scope="ip" data-limit-subject="' + escapeAttr(x.ips.split(',')[0].trim()) + '">Set IP limit</button>'
+        const limitIpBtn = firstIP
+          ? '<button class="secondary" data-go-limit-scope="ip" data-go-limit-subject="' + escapeAttr(firstIP) + '">IP limit</button>'
           : '';
         const limitPubBtn = x.public_key
-          ? '<button class="secondary" data-limit-scope="public_key" data-limit-subject="' + escapeAttr(x.public_key) + '">Set pubkey limit</button>'
+          ? '<button class="secondary" data-go-limit-scope="public_key" data-go-limit-subject="' + escapeAttr(x.public_key) + '">Pubkey limit</button>'
           : '';
         return [
-          '<span class="mono">' + (x.user_key || '') + '</span>',
+          '<button class="secondary" data-open-user="' + escapeAttr(x.user_key || '') + '">Open</button> <span class="mono">' + (x.user_key || '') + '</span>',
           '<span class="mono">' + (x.public_key || '') + '</span>',
           '<span class="mono">' + (x.ips || '') + '</span>',
           x.requests,
-          x.bytes_recv,
-          x.bytes_sent,
-          x.summary_data,
+          formatBytes(x.bytes_recv),
+          formatBytes(x.bytes_sent),
+          formatBytes(x.summary_data),
           x.first_use || '',
           x.last_use || '',
           banIpBtn + ' ' + banPubBtn + ' ' + limitIpBtn + ' ' + limitPubBtn,
@@ -654,28 +864,120 @@
         ['User key', 'Public key', 'IPs', 'Requests', 'Bytes recv', 'Bytes sent', 'Summary', 'First use', 'Last use', 'Actions'],
         rows
       );
-      document.querySelectorAll('[data-ban-kind]').forEach((btn) => {
-        btn.addEventListener('click', () => runSafe(async () => {
-          const kind = btn.getAttribute('data-ban-kind');
-          const value = btn.getAttribute('data-ban-value');
-          const reason = prompt('Ban reason for ' + kind + ' ' + value + ':', 'manual ban from users list') || '';
-          await api('/admin/bans', { method: 'POST', body: { kind, value, reason } });
-          showStatus('mainStatus', 'Ban created for ' + kind + ': ' + value, true);
-        }));
+      bindQuickActionButtons();
+      document.querySelectorAll('[data-open-user]').forEach((btn) => {
+        btn.addEventListener('click', () => runSafe(() => openUserDetails(btn.getAttribute('data-open-user'))));
       });
-      document.querySelectorAll('[data-limit-scope]').forEach((btn) => {
-        btn.addEventListener('click', () => runSafe(async () => {
-          const scope = btn.getAttribute('data-limit-scope');
-          const subject = btn.getAttribute('data-limit-subject');
-          const current = await api('/admin/users/limit?scope=' + encodeURIComponent(scope) + '&subject=' + encodeURIComponent(subject));
-          const currentJSON = JSON.stringify(current.limits || {}, null, 2);
-          const next = prompt('Set per-user limits JSON for ' + scope + ' ' + subject + '\\nExample: {\"minute\":1000,\"day\":50000}', currentJSON);
-          if (next === null) return;
-          const limits = JSON.parse(next || '{}');
-          await api('/admin/users/limit', { method: 'PUT', body: { scope, subject, limits } });
-          showStatus('mainStatus', 'Limits updated for ' + scope + ': ' + subject, true);
-        }));
+    }
+
+    async function openUserDetails(userKey) {
+      if (!userKey) return;
+      const info = await api('/admin/users/info?user_key=' + encodeURIComponent(userKey));
+      const pretty = JSON.stringify(info, null, 2);
+      document.getElementById('userInfoWrap').innerHTML = '<pre class="mono">' + pretty + '</pre>';
+      if (info.public_key) {
+        document.getElementById('userLimitScope').value = 'public_key';
+        document.getElementById('userLimitSubject').value = info.public_key;
+      } else if (info.ips) {
+        const firstIP = String(info.ips).split(',')[0].trim();
+        document.getElementById('userLimitScope').value = 'ip';
+        document.getElementById('userLimitSubject').value = firstIP;
+      }
+      await loadUserLimit();
+    }
+
+    async function loadUserLimit() {
+      const scope = document.getElementById('userLimitScope').value;
+      const subject = document.getElementById('userLimitSubject').value.trim();
+      if (!subject) throw new Error('subject is required');
+      const res = await api('/admin/users/limit?scope=' + encodeURIComponent(scope) + '&subject=' + encodeURIComponent(subject));
+      const split = splitWindowLimits(res.limits || {});
+      document.getElementById('userLimitRequests').value = jsonPretty(split.req);
+      document.getElementById('userLimitBytes').value = jsonPretty(split.bytes);
+    }
+
+    async function saveUserLimit() {
+      const scope = document.getElementById('userLimitScope').value;
+      const subject = document.getElementById('userLimitSubject').value.trim();
+      if (!subject) throw new Error('subject is required');
+      const reqMap = JSON.parse(document.getElementById('userLimitRequests').value || '{}');
+      const bytesMap = JSON.parse(document.getElementById('userLimitBytes').value || '{}');
+      const limits = buildWindowLimits(reqMap, bytesMap);
+      await api('/admin/users/limit', { method: 'PUT', body: { scope, subject, limits } });
+      showStatus('mainStatus', 'User limit saved', true);
+    }
+
+    async function loadGlobalLimits() {
+      const res = await api('/admin/limits/global');
+      const split = splitWindowLimits(res.limits || {});
+      document.getElementById('globalLimitRequests').value = jsonPretty(split.req);
+      document.getElementById('globalLimitBytes').value = jsonPretty(split.bytes);
+    }
+
+    async function saveGlobalLimits() {
+      const reqMap = JSON.parse(document.getElementById('globalLimitRequests').value || '{}');
+      const bytesMap = JSON.parse(document.getElementById('globalLimitBytes').value || '{}');
+      const limits = buildWindowLimits(reqMap, bytesMap);
+      await api('/admin/limits/global', { method: 'PUT', body: { limits } });
+      showStatus('mainStatus', 'Global limits saved', true);
+    }
+
+    async function loadRooms() {
+      const q = new URLSearchParams({
+        search: document.getElementById('roomsSearch').value.trim(),
+        sort: document.getElementById('roomsSort').value,
+        order: document.getElementById('roomsOrder').value,
+        limit: document.getElementById('roomsLimit').value || '50',
+        offset: '0',
       });
+      const data = await api('/admin/rooms/list?' + q.toString());
+      const rows = (data.items || []).map((x) => [
+        '<button class="secondary" data-open-room="' + escapeAttr(x.room_id || '') + '">Open</button> <span class="mono">' + (x.room_id || '') + '</span>',
+        x.requests,
+        formatBytes(x.bytes_recv),
+        formatBytes(x.bytes_sent),
+        formatBytes(x.summary_data),
+        x.current_members,
+        x.first_use || '',
+        x.last_use || '',
+        '<button class="secondary" data-go-room-ban="' + escapeAttr(x.room_id || '') + '">Ban</button> ' +
+        '<button class="secondary" data-go-room-limit="' + escapeAttr(x.room_id || '') + '">Limit</button>',
+      ]);
+      document.getElementById('roomsWrap').innerHTML = tableFromRows(
+        ['Room', 'Requests', 'Bytes recv', 'Bytes sent', 'Summary', 'Members', 'First use', 'Last use', 'Actions'],
+        rows
+      );
+      bindQuickActionButtons();
+      document.querySelectorAll('[data-open-room]').forEach((btn) => {
+        btn.addEventListener('click', () => runSafe(() => openRoomDetails(btn.getAttribute('data-open-room'))));
+      });
+    }
+
+    async function openRoomDetails(roomID) {
+      if (!roomID) return;
+      const info = await api('/admin/rooms/info?room_id=' + encodeURIComponent(roomID));
+      document.getElementById('roomInfoWrap').innerHTML = '<pre class="mono">' + JSON.stringify(info, null, 2) + '</pre>';
+      document.getElementById('roomLimitRoomId').value = roomID;
+      await loadRoomLimit();
+    }
+
+    async function loadRoomLimit() {
+      const roomID = document.getElementById('roomLimitRoomId').value.trim();
+      if (!roomID) throw new Error('room id is required');
+      const res = await api('/admin/rooms/limit?room_id=' + encodeURIComponent(roomID));
+      const split = splitWindowLimits(res.limits || {});
+      document.getElementById('roomLimitRequests').value = jsonPretty(split.req);
+      document.getElementById('roomLimitBytes').value = jsonPretty(split.bytes);
+    }
+
+    async function saveRoomLimit() {
+      const roomID = document.getElementById('roomLimitRoomId').value.trim();
+      if (!roomID) throw new Error('room id is required');
+      const reqMap = JSON.parse(document.getElementById('roomLimitRequests').value || '{}');
+      const bytesMap = JSON.parse(document.getElementById('roomLimitBytes').value || '{}');
+      const limits = buildWindowLimits(reqMap, bytesMap);
+      await api('/admin/rooms/limit', { method: 'PUT', body: { room_id: roomID, limits } });
+      showStatus('mainStatus', 'Room limit saved', true);
     }
 
     function escapeAttr(v) {
@@ -760,7 +1062,7 @@
       const kind = document.getElementById('banKind').value;
       const value = document.getElementById('banValue').value.trim();
       const reason = document.getElementById('banReason').value.trim();
-      const expiresAt = document.getElementById('banExpiresAt').value.trim();
+      const expiresAt = fromDateTimeLocalToISO(document.getElementById('banExpiresAt').value.trim());
       if (!value) throw new Error('ban value is required');
       await api('/admin/bans', {
         method: 'POST',
@@ -871,7 +1173,10 @@
     }
 
     async function bootstrapData() {
-      await Promise.allSettled([loadUsage(), loadUsers(), loadUsersList(), loadAccess(), loadLimits(), loadNetwork(), loadBans(), loadBackups()]);
+      await Promise.allSettled([
+        loadUsage(), loadUsers(), loadUsersList(), loadRooms(),
+        loadAccess(), loadLimits(), loadGlobalLimits(), loadNetwork(), loadBans(), loadBackups(),
+      ]);
     }
 
     function bindEvents() {
@@ -887,6 +1192,8 @@
 
       document.getElementById('loadLimitsBtn').addEventListener('click', () => runSafe(loadLimits));
       document.getElementById('saveLimitsBtn').addEventListener('click', () => runSafe(saveLimits));
+      document.getElementById('loadGlobalLimitBtn').addEventListener('click', () => runSafe(loadGlobalLimits));
+      document.getElementById('saveGlobalLimitBtn').addEventListener('click', () => runSafe(saveGlobalLimits));
 
       document.getElementById('loadNetworkBtn').addEventListener('click', () => runSafe(loadNetwork));
       document.getElementById('saveNetworkBtn').addEventListener('click', () => runSafe(saveNetwork));
@@ -897,6 +1204,11 @@
       document.getElementById('runBackupBtn').addEventListener('click', () => runSafe(runBackup));
       document.getElementById('refreshBackupsBtn').addEventListener('click', () => runSafe(loadBackups));
       document.getElementById('refreshUsersListBtn').addEventListener('click', () => runSafe(loadUsersList));
+      document.getElementById('loadUserLimitBtn').addEventListener('click', () => runSafe(loadUserLimit));
+      document.getElementById('saveUserLimitBtn').addEventListener('click', () => runSafe(saveUserLimit));
+      document.getElementById('refreshRoomsBtn').addEventListener('click', () => runSafe(loadRooms));
+      document.getElementById('loadRoomLimitBtn').addEventListener('click', () => runSafe(loadRoomLimit));
+      document.getElementById('saveRoomLimitBtn').addEventListener('click', () => runSafe(saveRoomLimit));
 
       document.getElementById('createAdminBtn').addEventListener('click', () => runSafe(createAdmin));
       document.getElementById('changePasswordBtn').addEventListener('click', () => runSafe(changePassword));

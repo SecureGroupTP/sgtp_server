@@ -34,6 +34,7 @@ type PolicyEngine interface {
 	CheckIPAllowed(ctx context.Context, ip string) error
 	CheckSubjectAllowed(ctx context.Context, scope, subject string) error
 	RecordNetworkUsage(ctx context.Context, ip, pubkey string, requests, bytesRecv, bytesSent int64, transport, status string)
+	RecordRoomUsage(ctx context.Context, roomID string, requests, bytesRecv, bytesSent int64, members int)
 	GetMaxRoomParticipants(ctx context.Context) int
 }
 
@@ -484,6 +485,7 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 	}
 
 	roomID := hdr.RoomUUID
+	roomIDHex := hex.EncodeToString(roomID[:])
 	senderID := hdr.SenderUUID
 	intentRaw := append(append([]byte(nil), hdrBuf...), tail...)
 
@@ -493,6 +495,10 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 	// ── Register client in room ──────────────────────────────────────────────
 	r := s.getOrCreateRoom(roomID)
 	if s.policy != nil {
+		if err := s.policy.CheckSubjectAllowed(ctx, "room", roomIDHex); err != nil {
+			s.logger.Printf("[server] reject join room=%x ip=%s reason=%v", roomID[:4], ip, err)
+			return
+		}
 		maxParticipants := s.policy.GetMaxRoomParticipants(ctx)
 		if maxParticipants > 0 && r.count() >= maxParticipants {
 			s.logger.Printf("[server] reject join room=%x ip=%s reason=room_full limit=%d", roomID[:4], ip, maxParticipants)
@@ -514,6 +520,9 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 	if replaced := r.add(cn); replaced != nil && replaced != cn {
 		replaced.Close()
 	}
+	if s.policy != nil {
+		s.policy.RecordRoomUsage(ctx, roomIDHex, 0, 0, 0, r.count())
+	}
 	s.logger.Printf("[server] uuid=%x joined room=%x (members now: %d)", senderID[:4], roomID[:4], r.count())
 
 	defer func() {
@@ -524,6 +533,9 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 			s.roomsMu.Unlock()
 		}
 		s.logger.Printf("[server] uuid=%x left room=%x (members now: %d)", senderID[:4], roomID[:4], r.count())
+		if s.policy != nil {
+			s.policy.RecordRoomUsage(ctx, roomIDHex, 0, 0, 0, r.count())
+		}
 	}()
 
 	// ── Forward loop ─────────────────────────────────────────────────────────
@@ -560,7 +572,12 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 					return
 				}
 			}
+			if err := s.policy.CheckSubjectAllowed(ctx, "room", roomIDHex); err != nil {
+				s.logger.Printf("[server] deny frame remote=%s room=%s reason=%v", remote, roomIDHex[:8], err)
+				return
+			}
 			s.policy.RecordNetworkUsage(ctx, ip, trackedPubKey, 1, int64(len(raw)), 0, "tcp", "frame_in")
+			s.policy.RecordRoomUsage(ctx, roomIDHex, 1, int64(len(raw)), 0, r.count())
 		}
 
 		s.logger.Printf("[server] relay type=0x%02x from=%x to=%x len=%d",
@@ -573,6 +590,7 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 		}
 		if s.policy != nil {
 			s.policy.RecordNetworkUsage(ctx, ip, trackedPubKey, 0, 0, int64(len(raw)), "tcp", "frame_out")
+			s.policy.RecordRoomUsage(ctx, roomIDHex, 0, 0, int64(len(raw)), r.count())
 		}
 	}
 }

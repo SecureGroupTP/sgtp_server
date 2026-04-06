@@ -245,7 +245,7 @@ func (s *Service) PutUsageLimits(ctx context.Context, actorID int64, l UsageLimi
 func (s *Service) ListBans(ctx context.Context) ([]BanRule, error) { return s.store.ListBanRules(ctx) }
 
 func (s *Service) AddBan(ctx context.Context, actorID int64, b BanRule) (*BanRule, error) {
-	if b.Kind != "username" && b.Kind != "public_key" && b.Kind != "ip" {
+	if b.Kind != "username" && b.Kind != "public_key" && b.Kind != "ip" && b.Kind != "room" {
 		return nil, fmt.Errorf("invalid ban kind")
 	}
 	out, err := s.store.InsertBanRule(ctx, actorID, b)
@@ -276,16 +276,63 @@ func (s *Service) ListUsers(ctx context.Context, search, ipFilter, pubFilter, so
 	return s.store.ListUsersDetailed(ctx, search, ipFilter, pubFilter, sortBy, sortOrder, limit, offset)
 }
 
-func (s *Service) GetUserLimits(ctx context.Context, scope, subject string) (map[string]int64, error) {
+func (s *Service) GetUserLimits(ctx context.Context, scope, subject string) (SubjectLimits, error) {
 	return s.store.GetSubjectLimits(ctx, scope, subject)
 }
 
-func (s *Service) PutUserLimits(ctx context.Context, actorID int64, scope, subject string, limits map[string]int64) error {
+func (s *Service) PutUserLimits(ctx context.Context, actorID int64, scope, subject string, limits SubjectLimits) error {
 	if err := s.store.PutSubjectLimits(ctx, scope, subject, limits); err != nil {
 		return err
 	}
 	_ = s.store.InsertAudit(ctx, actorID, "limits.subject.update", "usage_subject_limits", scope+":"+subject, limits)
 	return nil
+}
+
+func (s *Service) GetGlobalLimits(ctx context.Context) (SubjectLimits, error) {
+	return s.store.GetGlobalLimits(ctx)
+}
+
+func (s *Service) PutGlobalLimits(ctx context.Context, actorID int64, limits SubjectLimits) error {
+	if err := s.store.PutGlobalLimits(ctx, limits); err != nil {
+		return err
+	}
+	_ = s.store.InsertAudit(ctx, actorID, "limits.global.update", "usage_subject_limits", "global:*", limits)
+	return nil
+}
+
+func (s *Service) GetUserDetails(ctx context.Context, userKey string) (map[string]any, error) {
+	info, err := s.store.GetUserDetails(ctx, userKey)
+	if err != nil {
+		return nil, err
+	}
+	scope, subject := "ip", ""
+	if pk, _ := info["public_key"].(string); strings.TrimSpace(pk) != "" {
+		scope = "public_key"
+		subject = pk
+	} else if ips, _ := info["ips"].(string); strings.TrimSpace(ips) != "" {
+		subject = strings.TrimSpace(strings.Split(ips, ",")[0])
+	}
+	remaining, err := s.remainingForSubject(ctx, scope, subject)
+	if err == nil {
+		info["remaining_limits"] = remaining
+	}
+	return info, nil
+}
+
+func (s *Service) ListRooms(ctx context.Context, search, sortBy, sortOrder string, limit, offset int) ([]map[string]any, error) {
+	return s.store.ListRoomsDetailed(ctx, search, sortBy, sortOrder, limit, offset)
+}
+
+func (s *Service) GetRoomDetails(ctx context.Context, roomID string) (map[string]any, error) {
+	info, err := s.store.GetRoomDetails(ctx, roomID)
+	if err != nil {
+		return nil, err
+	}
+	remaining, err := s.remainingForSubject(ctx, "room", roomID)
+	if err == nil {
+		info["remaining_limits"] = remaining
+	}
+	return info, nil
 }
 
 func (s *Service) TriggerBackup(ctx context.Context, actorID int64) (int64, error) {
@@ -371,9 +418,21 @@ func (s *Service) RecordNetworkUsage(ctx context.Context, ip, pubkey string, req
 	if pubkey != "" {
 		_ = s.store.IncrementUsageCounters(ctx, "public_key", pubkey, requests, bytesRecv, bytesSent, time.Now().UTC())
 	}
+	_ = s.store.IncrementUsageCounters(ctx, "global", "*", requests, bytesRecv, bytesSent, time.Now().UTC())
+}
+
+func (s *Service) RecordRoomUsage(ctx context.Context, roomID string, requests, bytesRecv, bytesSent int64, members int) {
+	if strings.TrimSpace(roomID) == "" {
+		return
+	}
+	_ = s.store.UpsertRoomActivity(ctx, roomID, requests, bytesRecv, bytesSent, members)
+	_ = s.store.IncrementUsageCounters(ctx, "room", roomID, requests, bytesRecv, bytesSent, time.Now().UTC())
 }
 
 func (s *Service) CheckIPAllowed(ctx context.Context, ip string) error {
+	if err := s.CheckSubjectAllowed(ctx, "global", "*"); err != nil {
+		return err
+	}
 	if err := s.CheckSubjectAllowed(ctx, "ip", ip); err != nil {
 		return err
 	}
@@ -436,7 +495,9 @@ func (s *Service) CheckSubjectAllowed(ctx context.Context, scope, subject string
 		return err
 	}
 	for k, v := range custom {
-		merged[k] = v
+		if v.Requests > 0 {
+			merged[k] = v.Requests
+		}
 	}
 
 	current, err := s.store.CurrentUsageBySubject(ctx, scope, subject)
@@ -452,7 +513,63 @@ func (s *Service) CheckSubjectAllowed(ctx context.Context, scope, subject string
 			return fmt.Errorf("rate limit exceeded for %s: %s", scope, bucket)
 		}
 	}
+	// bytes limits are configured only via subject/global detailed limits.
+	for bucket, wl := range custom {
+		if wl.Bytes <= 0 {
+			continue
+		}
+		usage := current[bucket]
+		totalBytes := usage["bytes_recv"] + usage["bytes_sent"]
+		if totalBytes >= wl.Bytes {
+			return fmt.Errorf("traffic limit exceeded for %s: %s", scope, bucket)
+		}
+	}
 	return nil
+}
+
+func (s *Service) remainingForSubject(ctx context.Context, scope, subject string) (map[string]any, error) {
+	out := map[string]any{}
+	if strings.TrimSpace(subject) == "" {
+		return out, nil
+	}
+	current, err := s.store.CurrentUsageBySubject(ctx, scope, subject)
+	if err != nil {
+		return nil, err
+	}
+	custom, err := s.store.GetSubjectLimits(ctx, scope, subject)
+	if err != nil {
+		return nil, err
+	}
+	for _, bucket := range []string{"minute", "hour", "day", "week", "month"} {
+		usage := current[bucket]
+		reqUsed := usage["requests"]
+		bytesUsed := usage["bytes_recv"] + usage["bytes_sent"]
+		limit := custom[bucket]
+		reqRemain := "infinity"
+		bytesRemain := "infinity"
+		if limit.Requests > 0 {
+			reqRemain = fmt.Sprintf("%d", limit.Requests-reqUsed)
+			if limit.Requests-reqUsed < 0 {
+				reqRemain = "0"
+			}
+		}
+		if limit.Bytes > 0 {
+			bytesRemain = fmt.Sprintf("%d", limit.Bytes-bytesUsed)
+			if limit.Bytes-bytesUsed < 0 {
+				bytesRemain = "0"
+			}
+		}
+		out[bucket] = map[string]any{
+			"used_requests": reqUsed,
+			"used_bytes":    bytesUsed,
+			"limit":         limit,
+			"remaining": map[string]any{
+				"requests": reqRemain,
+				"bytes":    bytesRemain,
+			},
+		}
+	}
+	return out, nil
 }
 
 func (s *Service) GetMaxRoomParticipants(ctx context.Context) int {

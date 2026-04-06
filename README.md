@@ -196,8 +196,15 @@ Admin HTTP API lives on the same HTTP/HTTPS listeners:
 - `POST /admin/backups/run`
 - `GET /admin/backups`
 - `GET /admin/users/list` (search/filter/sort users by ip/public_key/traffic/time)
+- `GET /admin/users/info` (detailed info + remaining limits for a user key)
 - `GET /admin/users/limit` (read custom per-user limits)
 - `PUT /admin/users/limit` (set custom per-user limits)
+- `GET /admin/rooms/list` (search/filter/sort rooms by traffic/time)
+- `GET /admin/rooms/info` (detailed info + remaining limits for room)
+- `GET /admin/rooms/limit`
+- `PUT /admin/rooms/limit`
+- `GET /admin/limits/global` (global request/traffic limits for all users)
+- `PUT /admin/limits/global`
 
 ## Userdir wire protocol (binary, big-endian)
 

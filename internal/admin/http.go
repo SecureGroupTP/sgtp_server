@@ -36,6 +36,8 @@ func (h *HTTPHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /admin/settings/access", h.requireAuth(h.handlePutAccessSettings))
 	mux.HandleFunc("GET /admin/limits", h.requireAuth(h.handleGetLimits))
 	mux.HandleFunc("PUT /admin/limits", h.requireAuth(h.handlePutLimits))
+	mux.HandleFunc("GET /admin/limits/global", h.requireAuth(h.handleGetGlobalLimits))
+	mux.HandleFunc("PUT /admin/limits/global", h.requireAuth(h.handlePutGlobalLimits))
 
 	mux.HandleFunc("GET /admin/bans", h.requireAuth(h.handleListBans))
 	mux.HandleFunc("POST /admin/bans", h.requireAuth(h.handleCreateBan))
@@ -50,8 +52,13 @@ func (h *HTTPHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/users", h.requireAuth(h.handleCreateUser))
 	mux.HandleFunc("POST /admin/users/change-password", h.requireAuth(h.handleChangePassword))
 	mux.HandleFunc("GET /admin/users/list", h.requireAuth(h.handleUsersList))
+	mux.HandleFunc("GET /admin/users/info", h.requireAuth(h.handleUserInfo))
 	mux.HandleFunc("GET /admin/users/limit", h.requireAuth(h.handleGetUserLimit))
 	mux.HandleFunc("PUT /admin/users/limit", h.requireAuth(h.handlePutUserLimit))
+	mux.HandleFunc("GET /admin/rooms/list", h.requireAuth(h.handleRoomsList))
+	mux.HandleFunc("GET /admin/rooms/info", h.requireAuth(h.handleRoomInfo))
+	mux.HandleFunc("GET /admin/rooms/limit", h.requireAuth(h.handleGetRoomLimit))
+	mux.HandleFunc("PUT /admin/rooms/limit", h.requireAuth(h.handlePutRoomLimit))
 }
 
 func (h *HTTPHandler) handleUI(w http.ResponseWriter, _ *http.Request) {
@@ -232,6 +239,35 @@ func (h *HTTPHandler) handlePutLimits(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func (h *HTTPHandler) handleGetGlobalLimits(w http.ResponseWriter, r *http.Request) {
+	limits, err := h.svc.GetGlobalLimits(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"scope": "global", "subject": "*", "limits": limits})
+}
+
+func (h *HTTPHandler) handlePutGlobalLimits(w http.ResponseWriter, r *http.Request) {
+	actor := userFromCtx(r.Context())
+	if actor == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+		return
+	}
+	var req struct {
+		Limits SubjectLimits `json:"limits"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	if err := h.svc.PutGlobalLimits(r.Context(), actor.ID, req.Limits); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 func (h *HTTPHandler) handleListBans(w http.ResponseWriter, r *http.Request) {
 	bans, err := h.svc.ListBans(r.Context())
 	if err != nil {
@@ -399,6 +435,20 @@ func (h *HTTPHandler) handleUsersList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "limit": limit, "offset": offset})
 }
 
+func (h *HTTPHandler) handleUserInfo(w http.ResponseWriter, r *http.Request) {
+	userKey := strings.TrimSpace(r.URL.Query().Get("user_key"))
+	if userKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "user_key is required"})
+		return
+	}
+	info, err := h.svc.GetUserDetails(r.Context(), userKey)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, info)
+}
+
 func (h *HTTPHandler) handleGetUserLimit(w http.ResponseWriter, r *http.Request) {
 	scope := r.URL.Query().Get("scope")
 	subject := r.URL.Query().Get("subject")
@@ -421,9 +471,9 @@ func (h *HTTPHandler) handlePutUserLimit(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var req struct {
-		Scope   string           `json:"scope"`
-		Subject string           `json:"subject"`
-		Limits  map[string]int64 `json:"limits"`
+		Scope   string        `json:"scope"`
+		Subject string        `json:"subject"`
+		Limits  SubjectLimits `json:"limits"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
@@ -434,6 +484,75 @@ func (h *HTTPHandler) handlePutUserLimit(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := h.svc.PutUserLimits(r.Context(), actor.ID, req.Scope, req.Subject, req.Limits); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *HTTPHandler) handleRoomsList(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	search := q.Get("search")
+	sortBy := q.Get("sort")
+	order := q.Get("order")
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	items, err := h.svc.ListRooms(r.Context(), search, sortBy, order, limit, offset)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "limit": limit, "offset": offset})
+}
+
+func (h *HTTPHandler) handleRoomInfo(w http.ResponseWriter, r *http.Request) {
+	roomID := strings.TrimSpace(r.URL.Query().Get("room_id"))
+	if roomID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "room_id is required"})
+		return
+	}
+	info, err := h.svc.GetRoomDetails(r.Context(), roomID)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, info)
+}
+
+func (h *HTTPHandler) handleGetRoomLimit(w http.ResponseWriter, r *http.Request) {
+	roomID := strings.TrimSpace(r.URL.Query().Get("room_id"))
+	if roomID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "room_id is required"})
+		return
+	}
+	limits, err := h.svc.GetUserLimits(r.Context(), "room", roomID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"scope": "room", "subject": roomID, "limits": limits})
+}
+
+func (h *HTTPHandler) handlePutRoomLimit(w http.ResponseWriter, r *http.Request) {
+	actor := userFromCtx(r.Context())
+	if actor == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+		return
+	}
+	var req struct {
+		RoomID string        `json:"room_id"`
+		Limits SubjectLimits `json:"limits"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	req.RoomID = strings.TrimSpace(req.RoomID)
+	if req.RoomID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "room_id is required"})
+		return
+	}
+	if err := h.svc.PutUserLimits(r.Context(), actor.ID, "room", req.RoomID, req.Limits); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 		return
 	}
