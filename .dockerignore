@@ -6,8 +6,7 @@
 *.md
 *.sh
 
-# Deploy configs (not needed for build)
-deploy/
+# DB migrations (not needed for build)
 db/
 certbot/
 certs/
