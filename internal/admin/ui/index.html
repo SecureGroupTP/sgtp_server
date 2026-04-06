@@ -14,10 +14,8 @@
       --accent: #0f6fdf;
       --accent2: #0a56ad;
       --danger: #c53b3b;
-      --ok: #1f8f4d;
       --shadow: 0 8px 24px rgba(16, 36, 58, 0.08);
     }
-
     * { box-sizing: border-box; }
     body {
       margin: 0;
@@ -25,204 +23,67 @@
       color: var(--text);
       font-family: "Segoe UI", "Noto Sans", "Helvetica Neue", Arial, sans-serif;
     }
-
-    .wrap {
-      max-width: 1240px;
-      margin: 0 auto;
-      padding: 24px;
-    }
-
-    .topbar {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 16px;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    .title {
-      font-size: 24px;
-      font-weight: 700;
-      letter-spacing: 0.02em;
-    }
-
-    .auth {
-      display: none;
-      gap: 8px;
-      align-items: center;
-      font-size: 14px;
-      color: var(--muted);
-    }
-
+    .wrap { max-width: 1320px; margin: 0 auto; padding: 24px; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+    .title { font-size: 24px; font-weight: 700; letter-spacing: .02em; }
+    .auth { display: none; gap: 8px; align-items: center; font-size: 14px; color: var(--muted); }
     .auth.show { display: flex; }
-
-    .grid {
-      display: grid;
-      grid-template-columns: 280px 1fr;
-      gap: 14px;
-    }
-
-    @media (max-width: 980px) {
-      .grid { grid-template-columns: 1fr; }
-    }
-
-    .panel {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      box-shadow: var(--shadow);
-    }
-
-    .nav {
-      padding: 12px;
-      display: grid;
-      gap: 8px;
-    }
-
+    .grid { display: grid; grid-template-columns: 300px 1fr; gap: 14px; }
+    @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+    .nav { padding: 12px; display: grid; gap: 8px; }
     .nav button {
-      width: 100%;
-      text-align: left;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: #fff;
-      color: var(--text);
-      padding: 10px 12px;
-      cursor: pointer;
-      transition: all 0.15s ease;
-      font-weight: 600;
+      width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 10px;
+      background: #fff; color: var(--text); padding: 10px 12px; cursor: pointer; font-weight: 600;
     }
-
-    .nav button:hover { border-color: #b6c6d8; }
-    .nav button.active {
-      background: #e7f0ff;
-      border-color: #99b9ea;
-      color: #104891;
-    }
-
+    .nav button.active { background: #e7f0ff; border-color: #99b9ea; color: #104891; }
     .content { padding: 16px; }
     .section { display: none; }
     .section.active { display: block; }
-
-    h2 {
-      margin-top: 0;
-      margin-bottom: 10px;
-      font-size: 20px;
-    }
-
-    .sub {
-      margin-top: 0;
-      color: var(--muted);
-      font-size: 14px;
-      margin-bottom: 14px;
-    }
-
-    .row {
-      display: grid;
-      gap: 10px;
-      grid-template-columns: 1fr 1fr;
-      margin-bottom: 10px;
-    }
-
-    @media (max-width: 760px) {
-      .row { grid-template-columns: 1fr; }
-    }
-
-    label {
-      display: block;
-      font-weight: 600;
-      font-size: 13px;
-      margin-bottom: 6px;
-    }
-
-    input, select, textarea, button {
-      font: inherit;
-    }
-
+    h2 { margin: 0 0 10px; font-size: 20px; }
+    h3 { margin: 16px 0 8px; }
+    .sub { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
+    .row { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; margin-bottom: 10px; }
+    .row3 { display: grid; gap: 10px; grid-template-columns: 1fr 1fr 1fr; margin-bottom: 10px; }
+    @media (max-width: 900px) { .row, .row3 { grid-template-columns: 1fr; } }
+    label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+    input, select, textarea, button { font: inherit; }
     input, select, textarea {
-      width: 100%;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 10px 12px;
-      background: #fff;
-      color: var(--text);
+      width: 100%; border: 1px solid var(--line); border-radius: 10px;
+      padding: 10px 12px; background: #fff; color: var(--text);
     }
-
-    textarea {
-      min-height: 120px;
-      resize: vertical;
-      font-family: "Consolas", "SFMono-Regular", Menlo, monospace;
-      font-size: 13px;
-      line-height: 1.4;
-    }
-
-    .btns {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin: 8px 0 14px;
-    }
-
+    textarea { min-height: 110px; resize: vertical; font-family: "Consolas", "SFMono-Regular", Menlo, monospace; font-size: 13px; }
+    .btns { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 14px; }
     button.primary, button.secondary, button.danger {
-      border: 0;
-      border-radius: 10px;
-      padding: 10px 14px;
-      cursor: pointer;
-      font-weight: 700;
+      border: 0; border-radius: 10px; padding: 10px 14px; cursor: pointer; font-weight: 700;
     }
-
     button.primary { background: var(--accent); color: #fff; }
     button.primary:hover { background: var(--accent2); }
     button.secondary { background: #edf2f8; color: #334a64; }
     button.secondary:hover { background: #e2ebf5; }
     button.danger { background: #f4d6d6; color: #6b1a1a; }
     button.danger:hover { background: #efc6c6; }
-
-    .status {
-      border-radius: 10px;
-      padding: 9px 12px;
-      font-size: 13px;
-      margin-bottom: 12px;
-      display: none;
-    }
-
+    .status { border-radius: 10px; padding: 9px 12px; font-size: 13px; margin-bottom: 12px; display: none; }
     .status.show { display: block; }
     .status.ok { background: #e6f6ec; color: #1b6a3d; border: 1px solid #bde2cb; }
     .status.err { background: #f9e5e5; color: #7f2525; border: 1px solid #edc1c1; }
-
-    .table {
-      width: 100%;
-      border-collapse: collapse;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      overflow: hidden;
-      background: #fff;
-    }
-
-    .table th, .table td {
-      border-bottom: 1px solid var(--line);
-      text-align: left;
-      padding: 8px 10px;
-      font-size: 13px;
-      vertical-align: top;
-    }
-
+    .table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; }
+    .table th, .table td { border-bottom: 1px solid var(--line); text-align: left; padding: 8px 10px; font-size: 13px; vertical-align: top; }
     .table th { background: #f7fafc; }
     .small { font-size: 12px; color: var(--muted); }
     .mono { font-family: "Consolas", "SFMono-Regular", Menlo, monospace; }
-
     .login {
-      max-width: 460px;
-      margin: 36px auto 0;
-      padding: 18px;
-      background: #fff;
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      box-shadow: var(--shadow);
+      max-width: 460px; margin: 36px auto 0; padding: 18px;
+      background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow);
     }
-
     .app { display: none; }
     .app.show { display: block; }
+    .kv { display: grid; grid-template-columns: 220px 1fr; gap: 8px; margin-bottom: 6px; }
+    @media (max-width: 760px) { .kv { grid-template-columns: 1fr; } }
+    .limit-grid { width: 100%; border-collapse: collapse; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+    .limit-grid th, .limit-grid td { border-bottom: 1px solid var(--line); padding: 8px; font-size: 13px; }
+    .limit-grid th { background: #f7fafc; text-align: left; }
+    .inline { display: flex; gap: 8px; align-items: center; }
   </style>
 </head>
 <body>
@@ -243,23 +104,22 @@
       <input id="loginName" autocomplete="username" />
       <label for="loginPass">Password</label>
       <input id="loginPass" type="password" autocomplete="current-password" />
-      <div class="btns">
-        <button id="loginBtn" class="primary" type="button">Login</button>
-      </div>
+      <div class="btns"><button id="loginBtn" class="primary" type="button">Login</button></div>
     </div>
 
     <div id="app" class="app">
       <div class="grid">
         <div class="panel nav" id="nav">
           <button data-tab="dashboard" class="active">Dashboard</button>
-          <button data-tab="access">Access policy</button>
-          <button data-tab="limits">Limits</button>
-          <button data-tab="network">Network</button>
-          <button data-tab="bans">Bans</button>
-          <button data-tab="backups">Backups</button>
           <button data-tab="users">Users</button>
           <button data-tab="rooms">Rooms</button>
+          <button data-tab="bans">Bans</button>
+          <button data-tab="limits">Limits</button>
+          <button data-tab="access">Access policy</button>
+          <button data-tab="network">Network</button>
           <button data-tab="admins">Admins</button>
+          <button data-tab="actions">Actions</button>
+          <button data-tab="backups">Backups</button>
           <button data-tab="password">Change password</button>
         </div>
 
@@ -268,93 +128,114 @@
 
           <section class="section active" id="tab-dashboard">
             <h2>Dashboard</h2>
-            <p class="sub">Quick stats from <code>/admin/stats/*</code>.</p>
+            <p class="sub">Usage by users/rooms with quick actions.</p>
             <div class="btns">
               <button class="primary" id="refreshUsageBtn" type="button">Refresh usage</button>
-              <button class="secondary" id="refreshUsersBtn" type="button">Refresh users</button>
+              <button class="secondary" id="refreshUsersBtn" type="button">Refresh users top</button>
+              <button class="secondary" id="refreshRoomsDashBtn" type="button">Refresh rooms top</button>
             </div>
-            <h3>Usage top</h3>
+            <h3>Usage top (by IP/public key)</h3>
             <div id="usageWrap"></div>
             <h3>Users top</h3>
             <div id="usersWrap"></div>
+            <h3>Rooms top</h3>
+            <div id="roomsDashWrap"></div>
           </section>
 
-          <section class="section" id="tab-access">
-            <h2>Access policy</h2>
-            <p class="sub">Modes: <code>open | whitelist | password | key</code> (mutually exclusive).</p>
-            <div class="row">
+          <section class="section" id="tab-users">
+            <h2>Users</h2>
+            <p class="sub">Search by IP/public key and manage per-user bans/limits.</p>
+            <div class="row3">
+              <div><label for="usersSearch">Search</label><input id="usersSearch" placeholder="ip/public key" /></div>
+              <div><label for="usersIpFilter">IP filter</label><input id="usersIpFilter" /></div>
+              <div><label for="usersPubFilter">Public key filter</label><input id="usersPubFilter" /></div>
+            </div>
+            <div class="row3">
               <div>
-                <label for="accessMode">Mode</label>
-                <select id="accessMode">
-                  <option value="open">open</option>
-                  <option value="whitelist">whitelist</option>
-                  <option value="password">password</option>
-                  <option value="key">key</option>
+                <label for="usersSort">Sort by</label>
+                <select id="usersSort">
+                  <option value="requests">Requests</option>
+                  <option value="summary_data">Summary traffic</option>
+                  <option value="bytes_recv">Bytes recv</option>
+                  <option value="bytes_sent">Bytes sent</option>
+                  <option value="first_use">First use</option>
+                  <option value="last_use">Last use</option>
                 </select>
               </div>
-              <div>
-                <label for="accessPassword">Password (for mode=password)</label>
-                <input id="accessPassword" type="password" placeholder="leave empty to keep current" />
-              </div>
+              <div><label for="usersOrder">Order</label><select id="usersOrder"><option value="desc">Desc</option><option value="asc">Asc</option></select></div>
+              <div><label for="usersLimit">Rows</label><input id="usersLimit" type="number" value="50" min="1" max="500" /></div>
             </div>
-            <label for="accessKey">Shared key (for mode=key)</label>
-            <input id="accessKey" type="password" placeholder="leave empty to keep current" />
-            <label for="accessWhitelist">Whitelist IPs (one per line)</label>
-            <textarea id="accessWhitelist"></textarea>
+            <div class="btns"><button class="primary" id="refreshUsersListBtn" type="button">Search users</button></div>
+            <div id="usersListWrap"></div>
+
+            <h3>User details</h3>
+            <div id="userInfoWrap" class="small">Select user in table.</div>
+
+            <h3>User limits</h3>
+            <div class="row">
+              <div>
+                <label for="userLimitScope">Scope</label>
+                <select id="userLimitScope"><option value="ip">IP</option><option value="public_key">Public key</option></select>
+              </div>
+              <div><label for="userLimitSubject">Subject</label><input id="userLimitSubject" /></div>
+            </div>
+            <div id="userLimitEditor"></div>
             <div class="btns">
-              <button class="secondary" id="loadAccessBtn" type="button">Load</button>
-              <button class="primary" id="saveAccessBtn" type="button">Save</button>
+              <button class="secondary" id="loadUserLimitBtn" type="button">Load user limit</button>
+              <button class="primary" id="saveUserLimitBtn" type="button">Save user limit</button>
             </div>
           </section>
 
-          <section class="section" id="tab-limits">
-            <h2>Limits</h2>
-            <p class="sub">Default per-IP/per-public_key request limits and global request/traffic limits.</p>
-            <div class="row">
+          <section class="section" id="tab-rooms">
+            <h2>Rooms</h2>
+            <p class="sub">Room traffic, participants and per-room limits.</p>
+            <div class="row3">
+              <div><label for="roomsSearch">Room search</label><input id="roomsSearch" /></div>
               <div>
-                <label for="limitsIp">Per IP JSON</label>
-                <textarea id="limitsIp"></textarea>
+                <label for="roomsSort">Sort by</label>
+                <select id="roomsSort">
+                  <option value="requests">Requests</option>
+                  <option value="summary_data">Summary traffic</option>
+                  <option value="bytes_recv">Bytes recv</option>
+                  <option value="bytes_sent">Bytes sent</option>
+                  <option value="first_use">First use</option>
+                  <option value="last_use">Last use</option>
+                </select>
               </div>
-              <div>
-                <label for="limitsPub">Per public_key JSON</label>
-                <textarea id="limitsPub"></textarea>
-              </div>
+              <div><label for="roomsLimit">Rows</label><input id="roomsLimit" type="number" value="50" min="1" max="500" /></div>
             </div>
-            <div class="btns">
-              <button class="secondary" id="loadLimitsBtn" type="button">Load</button>
-              <button class="primary" id="saveLimitsBtn" type="button">Save</button>
+            <div class="row3">
+              <div><label for="roomsOrder">Order</label><select id="roomsOrder"><option value="desc">Desc</option><option value="asc">Asc</option></select></div>
+              <div></div><div></div>
             </div>
-            <h3>Global limits (all users)</h3>
-            <div class="row">
-              <div>
-                <label for="globalLimitRequests">Requests limits JSON by window</label>
-                <textarea id="globalLimitRequests">{\n  \"minute\": 0,\n  \"hour\": 0,\n  \"day\": 0,\n  \"week\": 0,\n  \"month\": 0\n}</textarea>
-              </div>
-              <div>
-                <label for="globalLimitBytes">Traffic limits JSON by window (bytes)</label>
-                <textarea id="globalLimitBytes">{\n  \"minute\": 0,\n  \"hour\": 0,\n  \"day\": 0,\n  \"week\": 0,\n  \"month\": 0\n}</textarea>
-              </div>
-            </div>
-            <div class="btns">
-              <button class="secondary" id="loadGlobalLimitBtn" type="button">Load global limits</button>
-              <button class="primary" id="saveGlobalLimitBtn" type="button">Save global limits</button>
-            </div>
-          </section>
+            <div class="btns"><button class="primary" id="refreshRoomsBtn" type="button">Search rooms</button></div>
+            <div id="roomsWrap"></div>
 
-          <section class="section" id="tab-network">
-            <h2>Network settings</h2>
-            <p class="sub">Save JSON. Apply with graceful restart after save.</p>
-            <label for="networkJson">Network JSON</label>
-            <textarea id="networkJson"></textarea>
+            <h3>Room details</h3>
+            <div id="roomInfoWrap" class="small">Select room in table.</div>
+
+            <h3>Room users</h3>
+            <div class="row3">
+              <div><label for="roomUsersIpFilter">IP filter</label><input id="roomUsersIpFilter" /></div>
+              <div><label for="roomUsersPubFilter">Public key filter</label><input id="roomUsersPubFilter" /></div>
+              <div><label for="roomUsersLimit">Rows</label><input id="roomUsersLimit" type="number" value="50" min="1" max="500" /></div>
+            </div>
+            <div class="btns"><button class="secondary" id="refreshRoomUsersBtn" type="button">Refresh room users</button></div>
+            <div id="roomUsersWrap"></div>
+
+            <h3>Room limits</h3>
+            <label for="roomLimitRoomId">Room ID</label>
+            <input id="roomLimitRoomId" />
+            <div id="roomLimitEditor"></div>
             <div class="btns">
-              <button class="secondary" id="loadNetworkBtn" type="button">Load</button>
-              <button class="primary" id="saveNetworkBtn" type="button">Save</button>
+              <button class="secondary" id="loadRoomLimitBtn" type="button">Load room limit</button>
+              <button class="primary" id="saveRoomLimitBtn" type="button">Save room limit</button>
             </div>
           </section>
 
           <section class="section" id="tab-bans">
             <h2>Bans</h2>
-            <p class="sub">Create and remove ban rules.</p>
+            <p class="sub">Ban by username/public key/ip/room. Root user cannot be banned.</p>
             <div class="row">
               <div>
                 <label for="banKind">Kind</label>
@@ -365,26 +246,106 @@
                   <option value="room">room</option>
                 </select>
               </div>
-              <div>
-                <label for="banValue">Value</label>
-                <input id="banValue" />
-              </div>
+              <div><label for="banValue">Value</label><input id="banValue" /></div>
             </div>
             <div class="row">
-              <div>
-                <label for="banReason">Reason</label>
-                <input id="banReason" />
-              </div>
-              <div>
-                <label for="banExpiresAt">Expires at (RFC3339, optional)</label>
-                <input id="banExpiresAt" type="datetime-local" />
-              </div>
+              <div><label for="banReason">Reason</label><input id="banReason" /></div>
+              <div><label for="banExpiresAt">Expires at</label><input id="banExpiresAt" type="datetime-local" /></div>
             </div>
             <div class="btns">
               <button class="primary" id="addBanBtn" type="button">Add ban</button>
-              <button class="secondary" id="refreshBansBtn" type="button">Refresh list</button>
+              <button class="secondary" id="refreshBansBtn" type="button">Refresh bans</button>
             </div>
             <div id="bansWrap"></div>
+          </section>
+
+          <section class="section" id="tab-limits">
+            <h2>Limits</h2>
+            <p class="sub">Configure defaults and global limits in human-readable form.</p>
+            <h3>Default per-IP request limits</h3>
+            <div id="defaultIpEditor"></div>
+            <h3>Default per-public key request limits</h3>
+            <div id="defaultPubEditor"></div>
+            <div class="btns">
+              <button class="secondary" id="loadLimitsBtn" type="button">Load defaults</button>
+              <button class="primary" id="saveLimitsBtn" type="button">Save defaults</button>
+            </div>
+
+            <h3>Global limits (all users)</h3>
+            <div id="globalLimitEditor"></div>
+            <div class="btns">
+              <button class="secondary" id="loadGlobalLimitBtn" type="button">Load global limits</button>
+              <button class="primary" id="saveGlobalLimitBtn" type="button">Save global limits</button>
+            </div>
+          </section>
+
+          <section class="section" id="tab-access">
+            <h2>Access policy</h2>
+            <p class="sub">Modes: <code>open | whitelist | password | key</code>.</p>
+            <div class="row">
+              <div>
+                <label for="accessMode">Mode</label>
+                <select id="accessMode">
+                  <option value="open">open</option>
+                  <option value="whitelist">whitelist</option>
+                  <option value="password">password</option>
+                  <option value="key">key</option>
+                </select>
+              </div>
+              <div><label for="accessPassword">Password (for mode=password)</label><input id="accessPassword" type="password" placeholder="leave empty to keep" /></div>
+            </div>
+            <label for="accessKey">Shared key (for mode=key)</label>
+            <input id="accessKey" type="password" placeholder="leave empty to keep" />
+            <label for="accessWhitelist">Whitelist IPs (one per line)</label>
+            <textarea id="accessWhitelist"></textarea>
+            <div class="btns">
+              <button class="secondary" id="loadAccessBtn" type="button">Load</button>
+              <button class="primary" id="saveAccessBtn" type="button">Save</button>
+            </div>
+          </section>
+
+          <section class="section" id="tab-network">
+            <h2>Network settings</h2>
+            <p class="sub">JSON config for listeners/tls (applies after graceful restart).</p>
+            <textarea id="networkJson"></textarea>
+            <div class="btns">
+              <button class="secondary" id="loadNetworkBtn" type="button">Load</button>
+              <button class="primary" id="saveNetworkBtn" type="button">Save</button>
+            </div>
+          </section>
+
+          <section class="section" id="tab-admins">
+            <h2>Admins</h2>
+            <p class="sub">Root can create/disable/delete admins. Root account is immutable.</p>
+            <h3>Create admin</h3>
+            <div class="row3">
+              <div><label for="newAdminLogin">Login name</label><input id="newAdminLogin" /></div>
+              <div><label for="newAdminDisplay">Display name</label><input id="newAdminDisplay" /></div>
+              <div><label for="newAdminPass">Password</label><input id="newAdminPass" type="password" /></div>
+            </div>
+            <div class="row">
+              <div>
+                <label for="newAdminForce">Force password change on first login</label>
+                <select id="newAdminForce"><option value="false">false</option><option value="true">true</option></select>
+              </div>
+              <div></div>
+            </div>
+            <div class="btns"><button class="primary" id="createAdminBtn" type="button">Create admin</button></div>
+            <h3>Admin list</h3>
+            <div class="btns"><button class="secondary" id="refreshAdminsBtn" type="button">Refresh admins</button></div>
+            <div id="adminsWrap"></div>
+          </section>
+
+          <section class="section" id="tab-actions">
+            <h2>Actions</h2>
+            <p class="sub">Audit trail: who did what, when and on which object.</p>
+            <div class="row3">
+              <div><label for="actionsActor">Actor ID</label><input id="actionsActor" type="number" min="0" placeholder="0 = all" /></div>
+              <div><label for="actionsFilter">Action contains</label><input id="actionsFilter" placeholder="ban, limits, admin..." /></div>
+              <div><label for="actionsLimit">Rows</label><input id="actionsLimit" type="number" value="100" min="1" max="1000" /></div>
+            </div>
+            <div class="btns"><button class="primary" id="refreshActionsBtn" type="button">Refresh actions</button></div>
+            <div id="actionsWrap"></div>
           </section>
 
           <section class="section" id="tab-backups">
@@ -397,178 +358,11 @@
             <div id="backupsWrap"></div>
           </section>
 
-          <section class="section" id="tab-users">
-            <h2>Users</h2>
-            <p class="sub">Search and sort users by ip/public key/traffic. Set per-user limits or ban directly.</p>
-            <div class="row">
-              <div>
-                <label for="usersSearch">Search (user/ip/key)</label>
-                <input id="usersSearch" placeholder="91.122 or pubkey..." />
-              </div>
-              <div>
-                <label for="usersIpFilter">IP filter</label>
-                <input id="usersIpFilter" placeholder="91.122.5.120" />
-              </div>
-            </div>
-            <div class="row">
-              <div>
-                <label for="usersPubFilter">Public key filter</label>
-                <input id="usersPubFilter" placeholder="hex public key" />
-              </div>
-              <div>
-                <label for="usersSort">Sort by</label>
-                <select id="usersSort">
-                  <option value="requests">requests</option>
-                  <option value="bytes_recv">bytes_recv</option>
-                  <option value="bytes_sent">bytes_sent</option>
-                  <option value="summary_data">summary_data</option>
-                  <option value="first_use">first_use</option>
-                  <option value="last_use">last_use</option>
-                </select>
-              </div>
-            </div>
-            <div class="row">
-              <div>
-                <label for="usersOrder">Order</label>
-                <select id="usersOrder">
-                  <option value="desc">desc</option>
-                  <option value="asc">asc</option>
-                </select>
-              </div>
-              <div>
-                <label for="usersLimit">Limit</label>
-                <input id="usersLimit" type="number" value="50" min="1" max="500" />
-              </div>
-            </div>
-            <div class="btns">
-              <button class="primary" id="refreshUsersListBtn" type="button">Search users</button>
-            </div>
-            <div id="usersListWrap"></div>
-            <h3>User info</h3>
-            <div id="userInfoWrap" class="small">Select user from table.</div>
-            <h3>User limit editor</h3>
-            <div class="row">
-              <div>
-                <label for="userLimitScope">Scope</label>
-                <select id="userLimitScope">
-                  <option value="ip">ip</option>
-                  <option value="public_key">public_key</option>
-                </select>
-              </div>
-              <div>
-                <label for="userLimitSubject">Subject</label>
-                <input id="userLimitSubject" placeholder="ip or public key" />
-              </div>
-            </div>
-            <div class="row">
-              <div>
-                <label for="userLimitRequests">Requests limits JSON by window</label>
-                <textarea id="userLimitRequests">{\n  \"minute\": 0,\n  \"hour\": 0,\n  \"day\": 0,\n  \"week\": 0,\n  \"month\": 0\n}</textarea>
-              </div>
-              <div>
-                <label for="userLimitBytes">Traffic limits JSON by window (bytes)</label>
-                <textarea id="userLimitBytes">{\n  \"minute\": 0,\n  \"hour\": 0,\n  \"day\": 0,\n  \"week\": 0,\n  \"month\": 0\n}</textarea>
-              </div>
-            </div>
-            <div class="btns">
-              <button class="secondary" id="loadUserLimitBtn" type="button">Load user limit</button>
-              <button class="primary" id="saveUserLimitBtn" type="button">Save user limit</button>
-            </div>
-          </section>
-
-          <section class="section" id="tab-rooms">
-            <h2>Rooms</h2>
-            <p class="sub">Traffic and request analytics with ban/limit controls per room.</p>
-            <div class="row">
-              <div>
-                <label for="roomsSearch">Search room</label>
-                <input id="roomsSearch" placeholder="room id..." />
-              </div>
-              <div>
-                <label for="roomsSort">Sort by</label>
-                <select id="roomsSort">
-                  <option value="requests">requests</option>
-                  <option value="bytes_recv">bytes_recv</option>
-                  <option value="bytes_sent">bytes_sent</option>
-                  <option value="summary_data">summary_data</option>
-                  <option value="first_use">first_use</option>
-                  <option value="last_use">last_use</option>
-                </select>
-              </div>
-            </div>
-            <div class="row">
-              <div>
-                <label for="roomsOrder">Order</label>
-                <select id="roomsOrder"><option value="desc">desc</option><option value="asc">asc</option></select>
-              </div>
-              <div>
-                <label for="roomsLimit">Limit</label>
-                <input id="roomsLimit" type="number" value="50" min="1" max="500" />
-              </div>
-            </div>
-            <div class="btns">
-              <button class="primary" id="refreshRoomsBtn" type="button">Search rooms</button>
-            </div>
-            <div id="roomsWrap"></div>
-            <h3>Room info</h3>
-            <div id="roomInfoWrap" class="small">Select room from table.</div>
-            <h3>Room limit editor</h3>
-            <label for="roomLimitRoomId">Room ID</label>
-            <input id="roomLimitRoomId" />
-            <div class="row">
-              <div>
-                <label for="roomLimitRequests">Requests limits JSON by window</label>
-                <textarea id="roomLimitRequests">{\n  \"minute\": 0,\n  \"hour\": 0,\n  \"day\": 0,\n  \"week\": 0,\n  \"month\": 0\n}</textarea>
-              </div>
-              <div>
-                <label for="roomLimitBytes">Traffic limits JSON by window (bytes)</label>
-                <textarea id="roomLimitBytes">{\n  \"minute\": 0,\n  \"hour\": 0,\n  \"day\": 0,\n  \"week\": 0,\n  \"month\": 0\n}</textarea>
-              </div>
-            </div>
-            <div class="btns">
-              <button class="secondary" id="loadRoomLimitBtn" type="button">Load room limit</button>
-              <button class="primary" id="saveRoomLimitBtn" type="button">Save room limit</button>
-            </div>
-          </section>
-
-          <section class="section" id="tab-admins">
-            <h2>Create admin</h2>
-            <p class="sub">Available for root users.</p>
-            <div class="row">
-              <div>
-                <label for="newAdminLogin">Login name</label>
-                <input id="newAdminLogin" />
-              </div>
-              <div>
-                <label for="newAdminDisplay">Display name</label>
-                <input id="newAdminDisplay" />
-              </div>
-            </div>
-            <div class="row">
-              <div>
-                <label for="newAdminPass">Password</label>
-                <input id="newAdminPass" type="password" />
-              </div>
-              <div>
-                <label for="newAdminForce">Force password change on first login</label>
-                <select id="newAdminForce">
-                  <option value="false">false</option>
-                  <option value="true">true</option>
-                </select>
-              </div>
-            </div>
-            <div class="btns">
-              <button class="primary" id="createAdminBtn" type="button">Create admin</button>
-            </div>
-          </section>
-
           <section class="section" id="tab-password">
             <h2>Change my password</h2>
             <label for="newPassword">New password</label>
             <input id="newPassword" type="password" />
-            <div class="btns">
-              <button class="primary" id="changePasswordBtn" type="button">Change password</button>
-            </div>
+            <div class="btns"><button class="primary" id="changePasswordBtn" type="button">Change password</button></div>
           </section>
         </div>
       </div>
@@ -576,10 +370,14 @@
   </div>
 
   <script>
+    const WINDOWS = ['minute', 'hour', 'day', 'week', 'month'];
+    const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
+
     const state = {
       accessToken: localStorage.getItem('sgtp_admin_access') || '',
       refreshToken: localStorage.getItem('sgtp_admin_refresh') || '',
       user: JSON.parse(localStorage.getItem('sgtp_admin_user') || 'null'),
+      selectedRoomId: '',
     };
 
     const loginBox = document.getElementById('loginBox');
@@ -606,9 +404,7 @@
       updateAuthView();
     }
 
-    function clearAuth() {
-      setAuth('', '', null);
-    }
+    function clearAuth() { setAuth('', '', null); }
 
     function updateAuthView() {
       const logged = !!state.accessToken;
@@ -634,18 +430,13 @@
     async function api(path, options = {}, retry = true) {
       const init = { ...options };
       init.headers = { ...(options.headers || {}) };
-      if (state.accessToken) {
-        init.headers['Authorization'] = 'Bearer ' + state.accessToken;
-      }
+      if (state.accessToken) init.headers['Authorization'] = 'Bearer ' + state.accessToken;
       if (init.body && typeof init.body !== 'string' && !(init.body instanceof FormData)) {
         init.headers['Content-Type'] = 'application/json';
         init.body = JSON.stringify(init.body);
       }
-
       let res = await fetch(path, init);
-      if (res.status === 401 && retry && await tryRefresh()) {
-        return api(path, options, false);
-      }
+      if (res.status === 401 && retry && await tryRefresh()) return api(path, options, false);
       if (!res.ok) {
         let msg = 'HTTP ' + res.status;
         try {
@@ -667,14 +458,17 @@
       return '<table class="table"><thead>' + thead + '</thead><tbody>' + tbody + '</tbody></table>';
     }
 
-    function jsonPretty(v) {
-      return JSON.stringify(v || {}, null, 2);
+    function fmtDate(v) {
+      if (!v) return '';
+      const d = new Date(v);
+      if (Number.isNaN(d.getTime())) return String(v);
+      return d.toLocaleString();
     }
 
     function formatBytes(v) {
       const n = Number(v || 0);
       if (!Number.isFinite(n) || n <= 0) return '0 B';
-      const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+      const units = BYTE_UNITS;
       let x = n;
       let i = 0;
       while (x >= 1024 && i < units.length - 1) {
@@ -699,37 +493,102 @@
       return d.toISOString();
     }
 
-    function buildWindowLimits(reqMap, bytesMap) {
+    function bytesFromUnit(value, unit) {
+      const n = Number(value || 0);
+      if (!Number.isFinite(n) || n <= 0) return 0;
+      const idx = Math.max(0, BYTE_UNITS.indexOf(unit || 'B'));
+      return Math.round(n * Math.pow(1024, idx));
+    }
+
+    function bestByteUnit(bytes) {
+      let b = Number(bytes || 0);
+      if (!Number.isFinite(b) || b <= 0) return { value: 0, unit: 'B' };
+      let unit = 'B';
+      for (let i = BYTE_UNITS.length - 1; i >= 1; i--) {
+        const size = Math.pow(1024, i);
+        if (b >= size) {
+          unit = BYTE_UNITS[i];
+          b = b / size;
+          break;
+        }
+      }
+      return { value: Number(b.toFixed(2)), unit };
+    }
+
+    function escapeAttr(v) {
+      return String(v || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function kvLine(label, value, mono = false) {
+      return '<div class="kv"><div class="small">' + label + '</div><div' + (mono ? ' class="mono"' : '') + '>' + (value ?? '') + '</div></div>';
+    }
+
+    function payloadSummary(payload) {
+      if (!payload || typeof payload !== 'object') return '';
+      const keys = Object.keys(payload).slice(0, 6);
+      if (!keys.length) return '';
+      return keys.map((k) => k + '=' + String(payload[k])).join(', ');
+    }
+
+    function renderLimitEditor(containerId, prefix, includeBytes) {
+      let html = '<table class="limit-grid"><thead><tr><th>Period</th><th>Max requests</th>';
+      if (includeBytes) html += '<th>Max traffic</th><th>Unit</th>';
+      html += '</tr></thead><tbody>';
+      WINDOWS.forEach((w) => {
+        html += '<tr>' +
+          '<td>' + w + '</td>' +
+          '<td><input id="' + prefix + '_req_' + w + '" type="number" min="0" value="0" /></td>' +
+          (includeBytes
+            ? '<td><input id="' + prefix + '_bytes_' + w + '" type="number" min="0" value="0" step="0.01" /></td>' +
+              '<td><select id="' + prefix + '_unit_' + w + '">' + BYTE_UNITS.map((u) => '<option value="' + u + '">' + u + '</option>').join('') + '</select></td>'
+            : '') +
+          '</tr>';
+      });
+      html += '</tbody></table>';
+      document.getElementById(containerId).innerHTML = html;
+    }
+
+    function readWindowRequestMap(prefix) {
       const out = {};
-      ['minute', 'hour', 'day', 'week', 'month'].forEach((w) => {
-        out[w] = {
-          requests: Number(reqMap[w] || 0),
-          bytes: Number(bytesMap[w] || 0),
-        };
+      WINDOWS.forEach((w) => {
+        out[w] = Number(document.getElementById(prefix + '_req_' + w).value || 0);
       });
       return out;
     }
 
-    function splitWindowLimits(limits) {
-      const req = {minute: 0, hour: 0, day: 0, week: 0, month: 0};
-      const bytes = {minute: 0, hour: 0, day: 0, week: 0, month: 0};
-      ['minute', 'hour', 'day', 'week', 'month'].forEach((w) => {
-        const v = (limits || {})[w] || {};
-        req[w] = Number(v.requests || 0);
-        bytes[w] = Number(v.bytes || 0);
+    function writeWindowRequestMap(prefix, map) {
+      WINDOWS.forEach((w) => {
+        const v = Number((map || {})[w] || 0);
+        document.getElementById(prefix + '_req_' + w).value = String(v);
       });
-      return {req, bytes};
+    }
+
+    function readSubjectLimits(prefix) {
+      const out = {};
+      WINDOWS.forEach((w) => {
+        const req = Number(document.getElementById(prefix + '_req_' + w).value || 0);
+        const bytesRaw = Number(document.getElementById(prefix + '_bytes_' + w).value || 0);
+        const unit = document.getElementById(prefix + '_unit_' + w).value;
+        out[w] = { requests: req, bytes: bytesFromUnit(bytesRaw, unit) };
+      });
+      return out;
+    }
+
+    function writeSubjectLimits(prefix, limits) {
+      WINDOWS.forEach((w) => {
+        const l = (limits || {})[w] || {};
+        const req = Number(l.requests || 0);
+        const bytes = Number(l.bytes || 0);
+        const b = bestByteUnit(bytes);
+        document.getElementById(prefix + '_req_' + w).value = String(req);
+        document.getElementById(prefix + '_bytes_' + w).value = String(b.value);
+        document.getElementById(prefix + '_unit_' + w).value = b.unit;
+      });
     }
 
     function bindNav() {
       document.querySelectorAll('#nav button').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          document.querySelectorAll('#nav button').forEach((x) => x.classList.remove('active'));
-          btn.classList.add('active');
-          const tab = btn.dataset.tab;
-          document.querySelectorAll('.section').forEach((s) => s.classList.remove('active'));
-          document.getElementById('tab-' + tab).classList.add('active');
-        });
+        btn.addEventListener('click', () => openTab(btn.dataset.tab));
       });
     }
 
@@ -745,37 +604,33 @@
     function bindQuickActionButtons() {
       document.querySelectorAll('[data-go-ban-kind]').forEach((btn) => {
         btn.addEventListener('click', () => {
-          const kind = btn.getAttribute('data-go-ban-kind');
-          const value = btn.getAttribute('data-go-ban-value');
           openTab('bans');
-          document.getElementById('banKind').value = kind;
-          document.getElementById('banValue').value = value || '';
+          document.getElementById('banKind').value = btn.getAttribute('data-go-ban-kind') || 'ip';
+          document.getElementById('banValue').value = btn.getAttribute('data-go-ban-value') || '';
           document.getElementById('banReason').focus();
         });
       });
       document.querySelectorAll('[data-go-limit-scope]').forEach((btn) => {
         btn.addEventListener('click', () => {
-          const scope = btn.getAttribute('data-go-limit-scope');
-          const subject = btn.getAttribute('data-go-limit-subject');
           openTab('users');
-          document.getElementById('userLimitScope').value = scope || 'ip';
-          document.getElementById('userLimitSubject').value = subject || '';
-        });
-      });
-      document.querySelectorAll('[data-go-room-ban]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const roomID = btn.getAttribute('data-go-room-ban');
-          openTab('bans');
-          document.getElementById('banKind').value = 'room';
-          document.getElementById('banValue').value = roomID || '';
-          document.getElementById('banReason').focus();
+          document.getElementById('userLimitScope').value = btn.getAttribute('data-go-limit-scope') || 'ip';
+          document.getElementById('userLimitSubject').value = btn.getAttribute('data-go-limit-subject') || '';
         });
       });
       document.querySelectorAll('[data-go-room-limit]').forEach((btn) => {
         btn.addEventListener('click', () => {
-          const roomID = btn.getAttribute('data-go-room-limit');
           openTab('rooms');
-          document.getElementById('roomLimitRoomId').value = roomID || '';
+          const roomID = btn.getAttribute('data-go-room-limit') || '';
+          document.getElementById('roomLimitRoomId').value = roomID;
+          state.selectedRoomId = roomID;
+        });
+      });
+      document.querySelectorAll('[data-go-room-ban]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          openTab('bans');
+          document.getElementById('banKind').value = 'room';
+          document.getElementById('banValue').value = btn.getAttribute('data-go-room-ban') || '';
+          document.getElementById('banReason').focus();
         });
       });
     }
@@ -790,35 +645,51 @@
         formatBytes(x.bytes_sent),
         x.transport,
         x.last_status,
+        fmtDate(x.last_use),
         '<button class="secondary" data-go-ban-kind="ip" data-go-ban-value="' + escapeAttr(x.ip) + '">Ban</button> ' +
         '<button class="secondary" data-go-limit-scope="ip" data-go-limit-subject="' + escapeAttr(x.ip) + '">Limit</button>',
       ]);
       document.getElementById('usageWrap').innerHTML = tableFromRows(
-        ['IP', 'Public key', 'Requests', 'Bytes recv', 'Bytes sent', 'Transport', 'Status', 'Actions'], rows
+        ['IP', 'Public key', 'Requests', 'Recv', 'Sent', 'Transport', 'Status', 'Last use', 'Actions'], rows
       );
       bindQuickActionButtons();
     }
 
-    async function loadUsers() {
+    async function loadUsersTop() {
       const data = await api('/admin/stats/users?limit=20');
       const rows = data.map((x) => [
         '<span class="mono">' + (x.user_key || '') + '</span>',
         '<span class="mono">' + (x.public_key || '') + '</span>',
         '<span class="mono">' + (x.ips || '') + '</span>',
         x.requests,
-        formatBytes(x.bytes_recv),
-        formatBytes(x.bytes_sent),
-        x.last_use,
-        '<button class="secondary" data-open-user="' + escapeAttr(x.user_key || '') + '">Info</button> ' +
-        (x.public_key ? '<button class="secondary" data-go-ban-kind="public_key" data-go-ban-value="' + escapeAttr(x.public_key) + '">Ban</button> ' : '') +
-        (x.public_key ? '<button class="secondary" data-go-limit-scope="public_key" data-go-limit-subject="' + escapeAttr(x.public_key) + '">Limit</button>' : ''),
+        formatBytes(x.bytes_recv + x.bytes_sent),
+        fmtDate(x.last_use),
+        '<button class="secondary" data-open-user="' + escapeAttr(x.user_key || '') + '">Open</button>',
       ]);
       document.getElementById('usersWrap').innerHTML = tableFromRows(
-        ['User key', 'Public key', 'IPs', 'Requests', 'Bytes recv', 'Bytes sent', 'Last use', 'Actions'], rows
+        ['User key', 'Public key', 'IPs', 'Requests', 'Traffic', 'Last use', 'Action'], rows
       );
-      bindQuickActionButtons();
       document.querySelectorAll('[data-open-user]').forEach((btn) => {
         btn.addEventListener('click', () => runSafe(() => openUserDetails(btn.getAttribute('data-open-user'))));
+      });
+    }
+
+    async function loadRoomsDash() {
+      const data = await api('/admin/rooms/list?limit=20&offset=0&sort=requests&order=desc');
+      const rows = (data.items || []).map((x) => [
+        '<span class="mono">' + (x.room_id || '') + '</span>',
+        x.requests,
+        formatBytes(x.summary_data),
+        x.current_members,
+        x.unique_users || 0,
+        fmtDate(x.last_use),
+        '<button class="secondary" data-open-room="' + escapeAttr(x.room_id || '') + '">Open</button>',
+      ]);
+      document.getElementById('roomsDashWrap').innerHTML = tableFromRows(
+        ['Room', 'Requests', 'Traffic', 'Online', 'Unique users', 'Last use', 'Action'], rows
+      );
+      document.querySelectorAll('[data-open-room]').forEach((btn) => {
+        btn.addEventListener('click', () => runSafe(() => openRoomDetails(btn.getAttribute('data-open-room'))));
       });
     }
 
@@ -835,18 +706,6 @@
       const data = await api('/admin/users/list?' + q.toString());
       const rows = (data.items || []).map((x) => {
         const firstIP = (x.ips || '').split(',')[0].trim();
-        const banIpBtn = firstIP
-          ? '<button class="secondary" data-go-ban-kind="ip" data-go-ban-value="' + escapeAttr(firstIP) + '">Ban IP</button>'
-          : '';
-        const banPubBtn = x.public_key
-          ? '<button class="secondary" data-go-ban-kind="public_key" data-go-ban-value="' + escapeAttr(x.public_key) + '">Ban pubkey</button>'
-          : '';
-        const limitIpBtn = firstIP
-          ? '<button class="secondary" data-go-limit-scope="ip" data-go-limit-subject="' + escapeAttr(firstIP) + '">IP limit</button>'
-          : '';
-        const limitPubBtn = x.public_key
-          ? '<button class="secondary" data-go-limit-scope="public_key" data-go-limit-subject="' + escapeAttr(x.public_key) + '">Pubkey limit</button>'
-          : '';
         return [
           '<button class="secondary" data-open-user="' + escapeAttr(x.user_key || '') + '">Open</button> <span class="mono">' + (x.user_key || '') + '</span>',
           '<span class="mono">' + (x.public_key || '') + '</span>',
@@ -855,14 +714,16 @@
           formatBytes(x.bytes_recv),
           formatBytes(x.bytes_sent),
           formatBytes(x.summary_data),
-          x.first_use || '',
-          x.last_use || '',
-          banIpBtn + ' ' + banPubBtn + ' ' + limitIpBtn + ' ' + limitPubBtn,
+          fmtDate(x.first_use),
+          fmtDate(x.last_use),
+          (firstIP ? '<button class="secondary" data-go-ban-kind="ip" data-go-ban-value="' + escapeAttr(firstIP) + '">Ban IP</button> ' : '') +
+          (x.public_key ? '<button class="secondary" data-go-ban-kind="public_key" data-go-ban-value="' + escapeAttr(x.public_key) + '">Ban key</button> ' : '') +
+          (firstIP ? '<button class="secondary" data-go-limit-scope="ip" data-go-limit-subject="' + escapeAttr(firstIP) + '">IP limit</button> ' : '') +
+          (x.public_key ? '<button class="secondary" data-go-limit-scope="public_key" data-go-limit-subject="' + escapeAttr(x.public_key) + '">Key limit</button>' : ''),
         ];
       });
       document.getElementById('usersListWrap').innerHTML = tableFromRows(
-        ['User key', 'Public key', 'IPs', 'Requests', 'Bytes recv', 'Bytes sent', 'Summary', 'First use', 'Last use', 'Actions'],
-        rows
+        ['User key', 'Public key', 'IPs', 'Requests', 'Recv', 'Sent', 'Traffic', 'First use', 'Last use', 'Actions'], rows
       );
       bindQuickActionButtons();
       document.querySelectorAll('[data-open-user]').forEach((btn) => {
@@ -870,18 +731,41 @@
       });
     }
 
+    function renderRemainingTable(remaining) {
+      if (!remaining || typeof remaining !== 'object') return '<div class="small">No limits configured.</div>';
+      const rows = WINDOWS.map((w) => {
+        const x = remaining[w] || {};
+        const usedReq = (x.used_requests ?? 0);
+        const usedBytes = Number(x.used_bytes || 0);
+        const rem = x.remaining || {};
+        return [w, usedReq, formatBytes(usedBytes), rem.requests ?? 'infinity', (rem.bytes === 'infinity' ? 'infinity' : formatBytes(rem.bytes))];
+      });
+      return tableFromRows(['Period', 'Used requests', 'Used traffic', 'Remaining req', 'Remaining traffic'], rows);
+    }
+
     async function openUserDetails(userKey) {
       if (!userKey) return;
+      openTab('users');
       const info = await api('/admin/users/info?user_key=' + encodeURIComponent(userKey));
-      const pretty = JSON.stringify(info, null, 2);
-      document.getElementById('userInfoWrap').innerHTML = '<pre class="mono">' + pretty + '</pre>';
+      let html = '';
+      html += kvLine('User key', info.user_key || '', true);
+      html += kvLine('Public key', info.public_key || '-', true);
+      html += kvLine('IPs', info.ips || '-', true);
+      html += kvLine('First use', fmtDate(info.first_use));
+      html += kvLine('Last use', fmtDate(info.last_use));
+      html += kvLine('Requests', info.requests || 0);
+      html += kvLine('Traffic recv', formatBytes(info.bytes_recv || 0));
+      html += kvLine('Traffic sent', formatBytes(info.bytes_sent || 0));
+      html += kvLine('Traffic total', formatBytes(info.summary_data || 0));
+      html += '<h4>Remaining limits</h4>' + renderRemainingTable(info.remaining_limits || {});
+      document.getElementById('userInfoWrap').innerHTML = html;
+
       if (info.public_key) {
         document.getElementById('userLimitScope').value = 'public_key';
         document.getElementById('userLimitSubject').value = info.public_key;
       } else if (info.ips) {
-        const firstIP = String(info.ips).split(',')[0].trim();
         document.getElementById('userLimitScope').value = 'ip';
-        document.getElementById('userLimitSubject').value = firstIP;
+        document.getElementById('userLimitSubject').value = String(info.ips).split(',')[0].trim();
       }
       await loadUserLimit();
     }
@@ -891,35 +775,16 @@
       const subject = document.getElementById('userLimitSubject').value.trim();
       if (!subject) throw new Error('subject is required');
       const res = await api('/admin/users/limit?scope=' + encodeURIComponent(scope) + '&subject=' + encodeURIComponent(subject));
-      const split = splitWindowLimits(res.limits || {});
-      document.getElementById('userLimitRequests').value = jsonPretty(split.req);
-      document.getElementById('userLimitBytes').value = jsonPretty(split.bytes);
+      writeSubjectLimits('userLimit', res.limits || {});
     }
 
     async function saveUserLimit() {
       const scope = document.getElementById('userLimitScope').value;
       const subject = document.getElementById('userLimitSubject').value.trim();
       if (!subject) throw new Error('subject is required');
-      const reqMap = JSON.parse(document.getElementById('userLimitRequests').value || '{}');
-      const bytesMap = JSON.parse(document.getElementById('userLimitBytes').value || '{}');
-      const limits = buildWindowLimits(reqMap, bytesMap);
+      const limits = readSubjectLimits('userLimit');
       await api('/admin/users/limit', { method: 'PUT', body: { scope, subject, limits } });
       showStatus('mainStatus', 'User limit saved', true);
-    }
-
-    async function loadGlobalLimits() {
-      const res = await api('/admin/limits/global');
-      const split = splitWindowLimits(res.limits || {});
-      document.getElementById('globalLimitRequests').value = jsonPretty(split.req);
-      document.getElementById('globalLimitBytes').value = jsonPretty(split.bytes);
-    }
-
-    async function saveGlobalLimits() {
-      const reqMap = JSON.parse(document.getElementById('globalLimitRequests').value || '{}');
-      const bytesMap = JSON.parse(document.getElementById('globalLimitBytes').value || '{}');
-      const limits = buildWindowLimits(reqMap, bytesMap);
-      await api('/admin/limits/global', { method: 'PUT', body: { limits } });
-      showStatus('mainStatus', 'Global limits saved', true);
     }
 
     async function loadRooms() {
@@ -934,18 +799,18 @@
       const rows = (data.items || []).map((x) => [
         '<button class="secondary" data-open-room="' + escapeAttr(x.room_id || '') + '">Open</button> <span class="mono">' + (x.room_id || '') + '</span>',
         x.requests,
-        formatBytes(x.bytes_recv),
-        formatBytes(x.bytes_sent),
         formatBytes(x.summary_data),
         x.current_members,
-        x.first_use || '',
-        x.last_use || '',
+        x.unique_ips || 0,
+        x.unique_public_keys || 0,
+        x.unique_users || 0,
+        fmtDate(x.first_use),
+        fmtDate(x.last_use),
         '<button class="secondary" data-go-room-ban="' + escapeAttr(x.room_id || '') + '">Ban</button> ' +
         '<button class="secondary" data-go-room-limit="' + escapeAttr(x.room_id || '') + '">Limit</button>',
       ]);
       document.getElementById('roomsWrap').innerHTML = tableFromRows(
-        ['Room', 'Requests', 'Bytes recv', 'Bytes sent', 'Summary', 'Members', 'First use', 'Last use', 'Actions'],
-        rows
+        ['Room', 'Requests', 'Traffic', 'Online', 'Unique IPs', 'Unique keys', 'Unique users', 'First use', 'Last use', 'Actions'], rows
       );
       bindQuickActionButtons();
       document.querySelectorAll('[data-open-room]').forEach((btn) => {
@@ -955,33 +820,71 @@
 
     async function openRoomDetails(roomID) {
       if (!roomID) return;
+      openTab('rooms');
+      state.selectedRoomId = roomID;
       const info = await api('/admin/rooms/info?room_id=' + encodeURIComponent(roomID));
-      document.getElementById('roomInfoWrap').innerHTML = '<pre class="mono">' + JSON.stringify(info, null, 2) + '</pre>';
+      let html = '';
+      html += kvLine('Room ID', info.room_id || '', true);
+      html += kvLine('First use', fmtDate(info.first_use));
+      html += kvLine('Last use', fmtDate(info.last_use));
+      html += kvLine('Requests', info.requests || 0);
+      html += kvLine('Traffic recv', formatBytes(info.bytes_recv || 0));
+      html += kvLine('Traffic sent', formatBytes(info.bytes_sent || 0));
+      html += kvLine('Traffic total', formatBytes(info.summary_data || 0));
+      html += kvLine('Current members', info.current_members || 0);
+      html += kvLine('Unique IPs', info.unique_ips || 0);
+      html += kvLine('Unique public keys', info.unique_public_keys || 0);
+      html += kvLine('Unique users', info.unique_users || 0);
+      html += '<h4>Remaining limits</h4>' + renderRemainingTable(info.remaining_limits || {});
+      document.getElementById('roomInfoWrap').innerHTML = html;
       document.getElementById('roomLimitRoomId').value = roomID;
       await loadRoomLimit();
+      await loadRoomUsers();
+    }
+
+    async function loadRoomUsers() {
+      const roomID = state.selectedRoomId || document.getElementById('roomLimitRoomId').value.trim();
+      if (!roomID) {
+        document.getElementById('roomUsersWrap').innerHTML = '<div class="small">Select room first.</div>';
+        return;
+      }
+      const q = new URLSearchParams({
+        room_id: roomID,
+        ip: document.getElementById('roomUsersIpFilter').value.trim(),
+        public_key: document.getElementById('roomUsersPubFilter').value.trim(),
+        sort: 'requests',
+        order: 'desc',
+        limit: document.getElementById('roomUsersLimit').value || '50',
+        offset: '0',
+      });
+      const data = await api('/admin/rooms/users?' + q.toString());
+      const rows = (data.items || []).map((x) => [
+        '<span class="mono">' + (x.ip || '') + '</span>',
+        '<span class="mono">' + (x.public_key || '') + '</span>',
+        '<span class="mono">' + (x.user_key || '') + '</span>',
+        x.requests,
+        formatBytes(x.summary_data),
+        fmtDate(x.first_use),
+        fmtDate(x.last_use),
+      ]);
+      document.getElementById('roomUsersWrap').innerHTML = tableFromRows(
+        ['IP', 'Public key', 'Unique user key', 'Requests', 'Traffic', 'First use', 'Last use'], rows
+      );
     }
 
     async function loadRoomLimit() {
       const roomID = document.getElementById('roomLimitRoomId').value.trim();
       if (!roomID) throw new Error('room id is required');
       const res = await api('/admin/rooms/limit?room_id=' + encodeURIComponent(roomID));
-      const split = splitWindowLimits(res.limits || {});
-      document.getElementById('roomLimitRequests').value = jsonPretty(split.req);
-      document.getElementById('roomLimitBytes').value = jsonPretty(split.bytes);
+      writeSubjectLimits('roomLimit', res.limits || {});
     }
 
     async function saveRoomLimit() {
       const roomID = document.getElementById('roomLimitRoomId').value.trim();
       if (!roomID) throw new Error('room id is required');
-      const reqMap = JSON.parse(document.getElementById('roomLimitRequests').value || '{}');
-      const bytesMap = JSON.parse(document.getElementById('roomLimitBytes').value || '{}');
-      const limits = buildWindowLimits(reqMap, bytesMap);
+      const limits = readSubjectLimits('roomLimit');
       await api('/admin/rooms/limit', { method: 'PUT', body: { room_id: roomID, limits } });
       showStatus('mainStatus', 'Room limit saved', true);
-    }
-
-    function escapeAttr(v) {
-      return String(v || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
     async function loadAccess() {
@@ -994,14 +897,10 @@
 
     async function saveAccess() {
       const mode = document.getElementById('accessMode').value;
-      const whitelist = document.getElementById('accessWhitelist').value
-        .split('\n').map((x) => x.trim()).filter(Boolean);
+      const whitelist = document.getElementById('accessWhitelist').value.split('\n').map((x) => x.trim()).filter(Boolean);
       const password = document.getElementById('accessPassword').value.trim();
       const sharedKey = document.getElementById('accessKey').value.trim();
-      await api('/admin/settings/access', {
-        method: 'PUT',
-        body: { mode, whitelist, password, shared_key: sharedKey },
-      });
+      await api('/admin/settings/access', { method: 'PUT', body: { mode, whitelist, password, shared_key: sharedKey } });
       showStatus('mainStatus', 'Access policy saved', true);
       document.getElementById('accessPassword').value = '';
       document.getElementById('accessKey').value = '';
@@ -1009,29 +908,37 @@
 
     async function loadLimits() {
       const limits = await api('/admin/limits');
-      document.getElementById('limitsIp').value = jsonPretty(limits.per_ip || {});
-      document.getElementById('limitsPub').value = jsonPretty(limits.per_pubkey || {});
+      writeWindowRequestMap('defaultIp', limits.per_ip || {});
+      writeWindowRequestMap('defaultPub', limits.per_pubkey || {});
     }
 
     async function saveLimits() {
-      const perIp = JSON.parse(document.getElementById('limitsIp').value || '{}');
-      const perPub = JSON.parse(document.getElementById('limitsPub').value || '{}');
-      await api('/admin/limits', {
-        method: 'PUT',
-        body: { per_ip: perIp, per_pubkey: perPub },
-      });
-      showStatus('mainStatus', 'Limits saved', true);
+      const per_ip = readWindowRequestMap('defaultIp');
+      const per_pubkey = readWindowRequestMap('defaultPub');
+      await api('/admin/limits', { method: 'PUT', body: { per_ip, per_pubkey } });
+      showStatus('mainStatus', 'Default limits saved', true);
+    }
+
+    async function loadGlobalLimits() {
+      const res = await api('/admin/limits/global');
+      writeSubjectLimits('globalLimit', res.limits || {});
+    }
+
+    async function saveGlobalLimits() {
+      const limits = readSubjectLimits('globalLimit');
+      await api('/admin/limits/global', { method: 'PUT', body: { limits } });
+      showStatus('mainStatus', 'Global limits saved', true);
     }
 
     async function loadNetwork() {
       const net = await api('/admin/settings/network');
-      document.getElementById('networkJson').value = jsonPretty(net);
+      document.getElementById('networkJson').value = JSON.stringify(net || {}, null, 2);
     }
 
     async function saveNetwork() {
       const body = JSON.parse(document.getElementById('networkJson').value || '{}');
       await api('/admin/settings/network', { method: 'PUT', body });
-      showStatus('mainStatus', 'Network settings saved. Restart sgtp_chat to apply.', true);
+      showStatus('mainStatus', 'Network settings saved. Restart service to apply.', true);
     }
 
     async function loadBans() {
@@ -1041,8 +948,8 @@
         b.kind,
         '<span class="mono">' + b.value + '</span>',
         b.reason || '',
-        b.expires_at || '',
-        b.created_at || '',
+        fmtDate(b.expires_at),
+        fmtDate(b.created_at),
         '<button class="danger" data-del-ban="' + b.id + '">Delete</button>',
       ]);
       document.getElementById('bansWrap').innerHTML = tableFromRows(
@@ -1062,17 +969,9 @@
       const kind = document.getElementById('banKind').value;
       const value = document.getElementById('banValue').value.trim();
       const reason = document.getElementById('banReason').value.trim();
-      const expiresAt = fromDateTimeLocalToISO(document.getElementById('banExpiresAt').value.trim());
+      const expires_at = fromDateTimeLocalToISO(document.getElementById('banExpiresAt').value.trim());
       if (!value) throw new Error('ban value is required');
-      await api('/admin/bans', {
-        method: 'POST',
-        body: {
-          kind,
-          value,
-          reason,
-          expires_at: expiresAt || null,
-        },
-      });
+      await api('/admin/bans', { method: 'POST', body: { kind, value, reason, expires_at: expires_at || null } });
       showStatus('mainStatus', 'Ban added', true);
       document.getElementById('banValue').value = '';
       document.getElementById('banReason').value = '';
@@ -1082,17 +981,8 @@
 
     async function loadBackups() {
       const data = await api('/admin/backups?limit=30');
-      const rows = data.map((b) => [
-        b.id,
-        b.status,
-        b.output_path || '',
-        b.started_at || '',
-        b.finished_at || '',
-        b.error_message || '',
-      ]);
-      document.getElementById('backupsWrap').innerHTML = tableFromRows(
-        ['ID', 'Status', 'Output', 'Started', 'Finished', 'Error'], rows
-      );
+      const rows = data.map((b) => [b.id, b.status, b.output_path || '', fmtDate(b.started_at), fmtDate(b.finished_at), b.error_message || '']);
+      document.getElementById('backupsWrap').innerHTML = tableFromRows(['ID', 'Status', 'Output', 'Started', 'Finished', 'Error'], rows);
     }
 
     async function runBackup() {
@@ -1104,39 +994,88 @@
     async function createAdmin() {
       const login = document.getElementById('newAdminLogin').value.trim();
       const display = document.getElementById('newAdminDisplay').value.trim();
-      const pass = document.getElementById('newAdminPass').value;
+      const password = document.getElementById('newAdminPass').value;
       const force = document.getElementById('newAdminForce').value === 'true';
-      if (!login || !pass) throw new Error('login and password are required');
-      await api('/admin/users', {
-        method: 'POST',
-        body: {
-          login_name: login,
-          display_name: display || login,
-          password: pass,
-          force_password_change: force,
-        },
-      });
-      showStatus('mainStatus', 'Admin user created', true);
+      if (!login || !password) throw new Error('login and password are required');
+      await api('/admin/users', { method: 'POST', body: { login_name: login, display_name: display || login, password, force_password_change: force } });
+      showStatus('mainStatus', 'Admin created', true);
       document.getElementById('newAdminLogin').value = '';
       document.getElementById('newAdminDisplay').value = '';
       document.getElementById('newAdminPass').value = '';
+      await loadAdmins();
+    }
+
+    async function loadAdmins() {
+      const data = await api('/admin/admins');
+      const rows = (data.items || []).map((x) => {
+        const immutable = x.role === 'root';
+        return [
+          x.id,
+          '<span class="mono">' + x.login_name + '</span>',
+          x.display_name,
+          x.role,
+          x.disabled ? 'yes' : 'no',
+          x.force_password_change ? 'yes' : 'no',
+          fmtDate(x.created_at),
+          immutable
+            ? '<span class="small">immutable</span>'
+            : '<button class="secondary" data-admin-disable="' + x.id + '" data-admin-disabled="' + (x.disabled ? 'false' : 'true') + '">' + (x.disabled ? 'Enable' : 'Disable') + '</button> ' +
+              '<button class="danger" data-admin-delete="' + x.id + '">Delete</button>'
+        ];
+      });
+      document.getElementById('adminsWrap').innerHTML = tableFromRows(
+        ['ID', 'Login', 'Display', 'Role', 'Disabled', 'Force pass', 'Created', 'Actions'], rows
+      );
+      document.querySelectorAll('[data-admin-disable]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const user_id = Number(btn.getAttribute('data-admin-disable'));
+          const disabled = btn.getAttribute('data-admin-disabled') === 'true';
+          await api('/admin/admins/disable', { method: 'POST', body: { user_id, disabled } });
+          showStatus('mainStatus', 'Admin updated', true);
+          await loadAdmins();
+        });
+      });
+      document.querySelectorAll('[data-admin-delete]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const id = Number(btn.getAttribute('data-admin-delete'));
+          await api('/admin/admins?id=' + encodeURIComponent(id), { method: 'DELETE' });
+          showStatus('mainStatus', 'Admin deleted', true);
+          await loadAdmins();
+        });
+      });
+    }
+
+    async function loadActions() {
+      const actorID = Number(document.getElementById('actionsActor').value || 0);
+      const action = document.getElementById('actionsFilter').value.trim();
+      const limit = Number(document.getElementById('actionsLimit').value || 100);
+      const q = new URLSearchParams({ actor_id: String(actorID), action, limit: String(limit), offset: '0' });
+      const data = await api('/admin/actions?' + q.toString());
+      const rows = (data.items || []).map((x) => [
+        x.id,
+        fmtDate(x.created_at),
+        (x.actor_name || x.actor_login || ('id:' + x.actor_user_id)),
+        x.action,
+        x.object_type + (x.object_id ? ':' + x.object_id : ''),
+        payloadSummary(x.payload),
+      ]);
+      document.getElementById('actionsWrap').innerHTML = tableFromRows(
+        ['ID', 'Time', 'Actor', 'Action', 'Object', 'Details'], rows
+      );
     }
 
     async function changePassword() {
-      const p = document.getElementById('newPassword').value;
-      if (!p) throw new Error('new password is required');
-      await api('/admin/users/change-password', {
-        method: 'POST',
-        body: { new_password: p },
-      });
+      const new_password = document.getElementById('newPassword').value;
+      if (!new_password) throw new Error('new password is required');
+      await api('/admin/users/change-password', { method: 'POST', body: { new_password } });
       document.getElementById('newPassword').value = '';
       showStatus('mainStatus', 'Password changed', true);
     }
 
     async function doLogin() {
-      const loginName = document.getElementById('loginName').value.trim();
+      const login_name = document.getElementById('loginName').value.trim();
       const password = document.getElementById('loginPass').value;
-      if (!loginName || !password) {
+      if (!login_name || !password) {
         showStatus('loginStatus', 'login_name and password are required', false);
         return;
       }
@@ -1144,7 +1083,7 @@
         const data = await fetch('/admin/auth/login', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ login_name: loginName, password }),
+          body: JSON.stringify({ login_name, password }),
         }).then(async (res) => {
           if (!res.ok) {
             let msg = 'login failed';
@@ -1164,9 +1103,7 @@
 
     async function doLogout() {
       try {
-        if (state.refreshToken) {
-          await api('/admin/auth/logout', { method: 'POST', body: { refresh_token: state.refreshToken } });
-        }
+        if (state.refreshToken) await api('/admin/auth/logout', { method: 'POST', body: { refresh_token: state.refreshToken } });
       } catch (_) {}
       clearAuth();
       updateAuthView();
@@ -1174,8 +1111,10 @@
 
     async function bootstrapData() {
       await Promise.allSettled([
-        loadUsage(), loadUsers(), loadUsersList(), loadRooms(),
-        loadAccess(), loadLimits(), loadGlobalLimits(), loadNetwork(), loadBans(), loadBackups(),
+        loadUsage(), loadUsersTop(), loadRoomsDash(),
+        loadUsersList(), loadRooms(),
+        loadAccess(), loadLimits(), loadGlobalLimits(), loadNetwork(),
+        loadBans(), loadAdmins(), loadActions(), loadBackups(),
       ]);
     }
 
@@ -1183,55 +1122,57 @@
       bindNav();
       document.getElementById('loginBtn').addEventListener('click', doLogin);
       document.getElementById('logoutBtn').addEventListener('click', doLogout);
+      document.getElementById('loginPass').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
 
       document.getElementById('refreshUsageBtn').addEventListener('click', () => runSafe(loadUsage));
-      document.getElementById('refreshUsersBtn').addEventListener('click', () => runSafe(loadUsers));
+      document.getElementById('refreshUsersBtn').addEventListener('click', () => runSafe(loadUsersTop));
+      document.getElementById('refreshRoomsDashBtn').addEventListener('click', () => runSafe(loadRoomsDash));
 
-      document.getElementById('loadAccessBtn').addEventListener('click', () => runSafe(loadAccess));
-      document.getElementById('saveAccessBtn').addEventListener('click', () => runSafe(saveAccess));
+      document.getElementById('refreshUsersListBtn').addEventListener('click', () => runSafe(loadUsersList));
+      document.getElementById('loadUserLimitBtn').addEventListener('click', () => runSafe(loadUserLimit));
+      document.getElementById('saveUserLimitBtn').addEventListener('click', () => runSafe(saveUserLimit));
+
+      document.getElementById('refreshRoomsBtn').addEventListener('click', () => runSafe(loadRooms));
+      document.getElementById('refreshRoomUsersBtn').addEventListener('click', () => runSafe(loadRoomUsers));
+      document.getElementById('loadRoomLimitBtn').addEventListener('click', () => runSafe(loadRoomLimit));
+      document.getElementById('saveRoomLimitBtn').addEventListener('click', () => runSafe(saveRoomLimit));
+
+      document.getElementById('addBanBtn').addEventListener('click', () => runSafe(addBan));
+      document.getElementById('refreshBansBtn').addEventListener('click', () => runSafe(loadBans));
 
       document.getElementById('loadLimitsBtn').addEventListener('click', () => runSafe(loadLimits));
       document.getElementById('saveLimitsBtn').addEventListener('click', () => runSafe(saveLimits));
       document.getElementById('loadGlobalLimitBtn').addEventListener('click', () => runSafe(loadGlobalLimits));
       document.getElementById('saveGlobalLimitBtn').addEventListener('click', () => runSafe(saveGlobalLimits));
 
+      document.getElementById('loadAccessBtn').addEventListener('click', () => runSafe(loadAccess));
+      document.getElementById('saveAccessBtn').addEventListener('click', () => runSafe(saveAccess));
+
       document.getElementById('loadNetworkBtn').addEventListener('click', () => runSafe(loadNetwork));
       document.getElementById('saveNetworkBtn').addEventListener('click', () => runSafe(saveNetwork));
 
-      document.getElementById('addBanBtn').addEventListener('click', () => runSafe(addBan));
-      document.getElementById('refreshBansBtn').addEventListener('click', () => runSafe(loadBans));
+      document.getElementById('createAdminBtn').addEventListener('click', () => runSafe(createAdmin));
+      document.getElementById('refreshAdminsBtn').addEventListener('click', () => runSafe(loadAdmins));
+      document.getElementById('refreshActionsBtn').addEventListener('click', () => runSafe(loadActions));
 
       document.getElementById('runBackupBtn').addEventListener('click', () => runSafe(runBackup));
       document.getElementById('refreshBackupsBtn').addEventListener('click', () => runSafe(loadBackups));
-      document.getElementById('refreshUsersListBtn').addEventListener('click', () => runSafe(loadUsersList));
-      document.getElementById('loadUserLimitBtn').addEventListener('click', () => runSafe(loadUserLimit));
-      document.getElementById('saveUserLimitBtn').addEventListener('click', () => runSafe(saveUserLimit));
-      document.getElementById('refreshRoomsBtn').addEventListener('click', () => runSafe(loadRooms));
-      document.getElementById('loadRoomLimitBtn').addEventListener('click', () => runSafe(loadRoomLimit));
-      document.getElementById('saveRoomLimitBtn').addEventListener('click', () => runSafe(saveRoomLimit));
-
-      document.getElementById('createAdminBtn').addEventListener('click', () => runSafe(createAdmin));
       document.getElementById('changePasswordBtn').addEventListener('click', () => runSafe(changePassword));
-
-      document.getElementById('loginPass').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') doLogin();
-      });
     }
 
     async function runSafe(fn) {
-      try {
-        await fn();
-      } catch (err) {
-        showStatus('mainStatus', String(err.message || err), false);
-      }
+      try { await fn(); } catch (err) { showStatus('mainStatus', String(err.message || err), false); }
     }
 
     (async function init() {
+      renderLimitEditor('defaultIpEditor', 'defaultIp', false);
+      renderLimitEditor('defaultPubEditor', 'defaultPub', false);
+      renderLimitEditor('globalLimitEditor', 'globalLimit', true);
+      renderLimitEditor('userLimitEditor', 'userLimit', true);
+      renderLimitEditor('roomLimitEditor', 'roomLimit', true);
       bindEvents();
       updateAuthView();
-      if (state.accessToken) {
-        await bootstrapData();
-      }
+      if (state.accessToken) await bootstrapData();
     })();
   </script>
 </body>

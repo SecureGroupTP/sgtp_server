@@ -181,6 +181,56 @@ func (s *Service) CreateAdmin(ctx context.Context, actor *AdminUser, loginName, 
 	return u, nil
 }
 
+func (s *Service) ListAdmins(ctx context.Context) ([]AdminUser, error) {
+	return s.store.ListAdminUsers(ctx)
+}
+
+func (s *Service) SetAdminDisabled(ctx context.Context, actor *AdminUser, targetID int64, disabled bool) error {
+	if actor == nil {
+		return fmt.Errorf("unauthorized")
+	}
+	if actor.Role != RoleRoot {
+		return fmt.Errorf("forbidden")
+	}
+	target, err := s.store.GetUserByID(ctx, targetID)
+	if err != nil {
+		return err
+	}
+	if target.Role == RoleRoot {
+		return fmt.Errorf("root user is immutable")
+	}
+	if err := s.store.SetAdminDisabled(ctx, targetID, disabled); err != nil {
+		return err
+	}
+	_ = s.store.InsertAudit(ctx, actor.ID, "admin.disable", "admin_user", strconv.FormatInt(targetID, 10), map[string]any{"disabled": disabled})
+	return nil
+}
+
+func (s *Service) DeleteAdmin(ctx context.Context, actor *AdminUser, targetID int64) error {
+	if actor == nil {
+		return fmt.Errorf("unauthorized")
+	}
+	if actor.Role != RoleRoot {
+		return fmt.Errorf("forbidden")
+	}
+	target, err := s.store.GetUserByID(ctx, targetID)
+	if err != nil {
+		return err
+	}
+	if target.Role == RoleRoot {
+		return fmt.Errorf("root user is immutable")
+	}
+	if err := s.store.DeleteAdminUser(ctx, targetID); err != nil {
+		return err
+	}
+	_ = s.store.InsertAudit(ctx, actor.ID, "admin.delete", "admin_user", strconv.FormatInt(targetID, 10), map[string]any{})
+	return nil
+}
+
+func (s *Service) ListActions(ctx context.Context, actorID int64, actionLike string, limit, offset int) ([]map[string]any, error) {
+	return s.store.ListActions(ctx, actorID, actionLike, limit, offset)
+}
+
 func (s *Service) ChangePassword(ctx context.Context, actorID int64, newPassword string, clearForce bool) error {
 	h, err := HashPassword(newPassword)
 	if err != nil {
@@ -247,6 +297,15 @@ func (s *Service) ListBans(ctx context.Context) ([]BanRule, error) { return s.st
 func (s *Service) AddBan(ctx context.Context, actorID int64, b BanRule) (*BanRule, error) {
 	if b.Kind != "username" && b.Kind != "public_key" && b.Kind != "ip" && b.Kind != "room" {
 		return nil, fmt.Errorf("invalid ban kind")
+	}
+	if b.Kind == "username" {
+		rootMatch, err := s.store.RootIdentityMatches(ctx, b.Value)
+		if err != nil {
+			return nil, err
+		}
+		if rootMatch {
+			return nil, fmt.Errorf("root user cannot be banned")
+		}
 	}
 	out, err := s.store.InsertBanRule(ctx, actorID, b)
 	if err != nil {
@@ -335,6 +394,10 @@ func (s *Service) GetRoomDetails(ctx context.Context, roomID string) (map[string
 	return info, nil
 }
 
+func (s *Service) ListRoomUsers(ctx context.Context, roomID, ipFilter, pubFilter, sortBy, sortOrder string, limit, offset int) ([]map[string]any, error) {
+	return s.store.ListRoomUsers(ctx, roomID, ipFilter, pubFilter, sortBy, sortOrder, limit, offset)
+}
+
 func (s *Service) TriggerBackup(ctx context.Context, actorID int64) (int64, error) {
 	cfgRaw, err := s.store.GetSetting(ctx, "backups")
 	if err != nil {
@@ -421,11 +484,12 @@ func (s *Service) RecordNetworkUsage(ctx context.Context, ip, pubkey string, req
 	_ = s.store.IncrementUsageCounters(ctx, "global", "*", requests, bytesRecv, bytesSent, time.Now().UTC())
 }
 
-func (s *Service) RecordRoomUsage(ctx context.Context, roomID string, requests, bytesRecv, bytesSent int64, members int) {
+func (s *Service) RecordRoomUsage(ctx context.Context, roomID, ip, pubkey string, requests, bytesRecv, bytesSent int64, members int) {
 	if strings.TrimSpace(roomID) == "" {
 		return
 	}
 	_ = s.store.UpsertRoomActivity(ctx, roomID, requests, bytesRecv, bytesSent, members)
+	_ = s.store.UpsertRoomUserActivity(ctx, roomID, ip, pubkey, requests, bytesRecv, bytesSent)
 	_ = s.store.IncrementUsageCounters(ctx, "room", roomID, requests, bytesRecv, bytesSent, time.Now().UTC())
 }
 
@@ -487,8 +551,6 @@ func (s *Service) CheckSubjectAllowed(ctx context.Context, scope, subject string
 		for k, v := range limits.PerPubKey {
 			merged[k] = v
 		}
-	default:
-		return nil
 	}
 	custom, err := s.store.GetSubjectLimits(ctx, scope, subject)
 	if err != nil {

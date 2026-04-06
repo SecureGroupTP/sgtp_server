@@ -85,6 +85,112 @@ WHERE id = $1
 	return &u, nil
 }
 
+func (s *Store) ListAdminUsers(ctx context.Context) ([]AdminUser, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, login_name, display_name, role, force_password_change, disabled, created_at
+FROM admin_users
+ORDER BY CASE WHEN role='root' THEN 0 ELSE 1 END, created_at ASC
+`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]AdminUser, 0, 16)
+	for rows.Next() {
+		var u AdminUser
+		var roleStr string
+		if err := rows.Scan(&u.ID, &u.LoginName, &u.DisplayName, &roleStr, &u.ForcePasswordChange, &u.Disabled, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		u.Role = UserRole(roleStr)
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) SetAdminDisabled(ctx context.Context, userID int64, disabled bool) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE admin_users SET disabled=$2, updated_at=now() WHERE id=$1`, userID, disabled)
+	return err
+}
+
+func (s *Store) DeleteAdminUser(ctx context.Context, userID int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM admin_users WHERE id=$1`, userID)
+	return err
+}
+
+func (s *Store) ListActions(ctx context.Context, actorID int64, actionLike string, limit, offset int) ([]map[string]any, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT
+  l.id,
+  l.actor_user_id,
+  COALESCE(u.login_name, ''),
+  COALESCE(u.display_name, ''),
+  l.action,
+  l.object_type,
+  COALESCE(l.object_id, ''),
+  l.payload_json,
+  l.created_at
+FROM audit_log l
+LEFT JOIN admin_users u ON u.id = l.actor_user_id
+WHERE ($1 = 0 OR l.actor_user_id = $1)
+  AND ($2 = '' OR l.action ILIKE $2)
+ORDER BY l.id DESC
+LIMIT $3 OFFSET $4
+`, actorID, likePattern(actionLike), limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]map[string]any, 0, limit)
+	for rows.Next() {
+		var id, actor sql.NullInt64
+		var login, display, action, objType, objID string
+		var payloadRaw []byte
+		var created time.Time
+		if err := rows.Scan(&id, &actor, &login, &display, &action, &objType, &objID, &payloadRaw, &created); err != nil {
+			return nil, err
+		}
+		var payload any = map[string]any{}
+		if len(payloadRaw) > 0 {
+			_ = json.Unmarshal(payloadRaw, &payload)
+		}
+		out = append(out, map[string]any{
+			"id":            id.Int64,
+			"actor_user_id": actor.Int64,
+			"actor_login":   login,
+			"actor_name":    display,
+			"action":        action,
+			"object_type":   objType,
+			"object_id":     objID,
+			"payload":       payload,
+			"created_at":    created,
+		})
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) RootIdentityMatches(ctx context.Context, value string) (bool, error) {
+	var n int64
+	err := s.db.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM admin_users
+WHERE role='root' AND (lower(login_name)=lower($1) OR lower(display_name)=lower($1))
+`, strings.TrimSpace(value)).Scan(&n)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 func (s *Store) UpdateUserPassword(ctx context.Context, userID int64, passwordHash string, clearForce bool) error {
 	if clearForce {
 		_, err := s.db.ExecContext(ctx, `UPDATE admin_users SET password_hash=$2, force_password_change=false, updated_at=now() WHERE id=$1`, userID, passwordHash)
@@ -629,6 +735,26 @@ DO UPDATE SET
 	return err
 }
 
+func (s *Store) UpsertRoomUserActivity(ctx context.Context, roomID, ip, pubkey string, req, bytesRecv, bytesSent int64) error {
+	roomID = strings.TrimSpace(roomID)
+	ip = strings.TrimSpace(ip)
+	pubkey = strings.TrimSpace(pubkey)
+	if roomID == "" || ip == "" {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO room_user_activity (room_id, ip, public_key, first_use, last_use, requests, bytes_recv, bytes_sent)
+VALUES ($1,$2,$3,now(),now(),$4,$5,$6)
+ON CONFLICT (room_id, ip, public_key)
+DO UPDATE SET
+  last_use=now(),
+  requests=room_user_activity.requests + EXCLUDED.requests,
+  bytes_recv=room_user_activity.bytes_recv + EXCLUDED.bytes_recv,
+  bytes_sent=room_user_activity.bytes_sent + EXCLUDED.bytes_sent
+`, roomID, ip, pubkey, req, bytesRecv, bytesSent)
+	return err
+}
+
 func (s *Store) ListRoomsDetailed(ctx context.Context, search, sortBy, sortOrder string, limit, offset int) ([]map[string]any, error) {
 	if limit <= 0 {
 		limit = 50
@@ -656,10 +782,33 @@ func (s *Store) ListRoomsDetailed(ctx context.Context, search, sortBy, sortOrder
 		order = "ASC"
 	}
 	q := fmt.Sprintf(`
-SELECT room_id, first_use, last_use, requests, bytes_recv, bytes_sent, (bytes_recv + bytes_sent) AS summary_data, current_members
-FROM room_activity
-WHERE ($1 = '' OR room_id ILIKE $1)
-ORDER BY %s %s, last_use DESC
+SELECT
+  r.room_id,
+  r.first_use,
+  r.last_use,
+  r.requests,
+  r.bytes_recv,
+  r.bytes_sent,
+  (r.bytes_recv + r.bytes_sent) AS summary_data,
+  r.current_members,
+  COALESCE(x.unique_ips, 0) AS unique_ips,
+  COALESCE(x.unique_public_keys, 0) AS unique_public_keys,
+  COALESCE(x.unique_users, 0) AS unique_users
+FROM room_activity r
+LEFT JOIN (
+  SELECT
+    room_id,
+    COUNT(DISTINCT ip) AS unique_ips,
+    COUNT(DISTINCT NULLIF(public_key,'')) AS unique_public_keys,
+    COUNT(DISTINCT CASE
+      WHEN COALESCE(public_key,'') <> '' THEN 'pk:' || public_key
+      ELSE 'ip:' || ip
+    END) AS unique_users
+  FROM room_user_activity
+  GROUP BY room_id
+) x ON x.room_id = r.room_id
+WHERE ($1 = '' OR r.room_id ILIKE $1)
+ORDER BY %s %s, r.last_use DESC
 LIMIT $2 OFFSET $3
 `, sortColumn, order)
 	rows, err := s.db.QueryContext(ctx, q, likePattern(search), limit, offset)
@@ -672,19 +821,22 @@ LIMIT $2 OFFSET $3
 		var roomID string
 		var first, last time.Time
 		var req, br, bs, sum int64
-		var members int
-		if err := rows.Scan(&roomID, &first, &last, &req, &br, &bs, &sum, &members); err != nil {
+		var members, uniqueIPs, uniquePub, uniqueUsers int
+		if err := rows.Scan(&roomID, &first, &last, &req, &br, &bs, &sum, &members, &uniqueIPs, &uniquePub, &uniqueUsers); err != nil {
 			return nil, err
 		}
 		out = append(out, map[string]any{
-			"room_id":         roomID,
-			"first_use":       first,
-			"last_use":        last,
-			"requests":        req,
-			"bytes_recv":      br,
-			"bytes_sent":      bs,
-			"summary_data":    sum,
-			"current_members": members,
+			"room_id":            roomID,
+			"first_use":          first,
+			"last_use":           last,
+			"requests":           req,
+			"bytes_recv":         br,
+			"bytes_sent":         bs,
+			"summary_data":       sum,
+			"current_members":    members,
+			"unique_ips":         uniqueIPs,
+			"unique_public_keys": uniquePub,
+			"unique_users":       uniqueUsers,
 		})
 	}
 	return out, rows.Err()
@@ -692,28 +844,134 @@ LIMIT $2 OFFSET $3
 
 func (s *Store) GetRoomDetails(ctx context.Context, roomID string) (map[string]any, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT room_id, first_use, last_use, requests, bytes_recv, bytes_sent, (bytes_recv + bytes_sent) AS summary_data, current_members
-FROM room_activity
-WHERE room_id = $1
+SELECT
+  r.room_id,
+  r.first_use,
+  r.last_use,
+  r.requests,
+  r.bytes_recv,
+  r.bytes_sent,
+  (r.bytes_recv + r.bytes_sent) AS summary_data,
+  r.current_members,
+  COALESCE(x.unique_ips, 0) AS unique_ips,
+  COALESCE(x.unique_public_keys, 0) AS unique_public_keys,
+  COALESCE(x.unique_users, 0) AS unique_users
+FROM room_activity r
+LEFT JOIN (
+  SELECT
+    room_id,
+    COUNT(DISTINCT ip) AS unique_ips,
+    COUNT(DISTINCT NULLIF(public_key,'')) AS unique_public_keys,
+    COUNT(DISTINCT CASE
+      WHEN COALESCE(public_key,'') <> '' THEN 'pk:' || public_key
+      ELSE 'ip:' || ip
+    END) AS unique_users
+  FROM room_user_activity
+  GROUP BY room_id
+) x ON x.room_id = r.room_id
+WHERE r.room_id = $1
 LIMIT 1
 `, roomID)
 	var first, last time.Time
 	var req, br, bs, sum int64
-	var members int
+	var members, uniqueIPs, uniquePub, uniqueUsers int
 	var outID string
-	if err := row.Scan(&outID, &first, &last, &req, &br, &bs, &sum, &members); err != nil {
+	if err := row.Scan(&outID, &first, &last, &req, &br, &bs, &sum, &members, &uniqueIPs, &uniquePub, &uniqueUsers); err != nil {
 		return nil, err
 	}
 	return map[string]any{
-		"room_id":         outID,
-		"first_use":       first,
-		"last_use":        last,
-		"requests":        req,
-		"bytes_recv":      br,
-		"bytes_sent":      bs,
-		"summary_data":    sum,
-		"current_members": members,
+		"room_id":            outID,
+		"first_use":          first,
+		"last_use":           last,
+		"requests":           req,
+		"bytes_recv":         br,
+		"bytes_sent":         bs,
+		"summary_data":       sum,
+		"current_members":    members,
+		"unique_ips":         uniqueIPs,
+		"unique_public_keys": uniquePub,
+		"unique_users":       uniqueUsers,
 	}, nil
+}
+
+func (s *Store) ListRoomUsers(ctx context.Context, roomID, ipFilter, pubFilter, sortBy, sortOrder string, limit, offset int) ([]map[string]any, error) {
+	if strings.TrimSpace(roomID) == "" {
+		return nil, fmt.Errorf("room_id is required")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	sortColumn := map[string]string{
+		"requests":     "requests",
+		"bytes_recv":   "bytes_recv",
+		"bytes_sent":   "bytes_sent",
+		"summary_data": "summary_data",
+		"first_use":    "first_use",
+		"last_use":     "last_use",
+		"ip":           "ip",
+		"public_key":   "public_key",
+	}[strings.ToLower(strings.TrimSpace(sortBy))]
+	if sortColumn == "" {
+		sortColumn = "requests"
+	}
+	order := "DESC"
+	if strings.EqualFold(strings.TrimSpace(sortOrder), "asc") {
+		order = "ASC"
+	}
+	q := fmt.Sprintf(`
+SELECT
+  ip,
+  COALESCE(public_key, '') AS public_key,
+  first_use,
+  last_use,
+  requests,
+  bytes_recv,
+  bytes_sent,
+  (bytes_recv + bytes_sent) AS summary_data
+FROM room_user_activity
+WHERE room_id = $1
+  AND ($2 = '' OR ip ILIKE $2)
+  AND ($3 = '' OR public_key ILIKE $3)
+ORDER BY %s %s, last_use DESC
+LIMIT $4 OFFSET $5
+`, sortColumn, order)
+	rows, err := s.db.QueryContext(ctx, q, roomID, likePattern(ipFilter), likePattern(pubFilter), limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]map[string]any, 0, limit)
+	for rows.Next() {
+		var ip, pub string
+		var first, last time.Time
+		var req, br, bs, sum int64
+		if err := rows.Scan(&ip, &pub, &first, &last, &req, &br, &bs, &sum); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{
+			"ip":           ip,
+			"public_key":   pub,
+			"first_use":    first,
+			"last_use":     last,
+			"requests":     req,
+			"bytes_recv":   br,
+			"bytes_sent":   bs,
+			"summary_data": sum,
+			"user_key": func() string {
+				if pub != "" {
+					return pub
+				}
+				return "ip:" + ip
+			}(),
+		})
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) UpsertClientActivity(ctx context.Context, ip, pubkey string, req, bytesRecv, bytesSent int64, transport, status string) error {

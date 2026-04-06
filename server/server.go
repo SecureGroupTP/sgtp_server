@@ -34,7 +34,7 @@ type PolicyEngine interface {
 	CheckIPAllowed(ctx context.Context, ip string) error
 	CheckSubjectAllowed(ctx context.Context, scope, subject string) error
 	RecordNetworkUsage(ctx context.Context, ip, pubkey string, requests, bytesRecv, bytesSent int64, transport, status string)
-	RecordRoomUsage(ctx context.Context, roomID string, requests, bytesRecv, bytesSent int64, members int)
+	RecordRoomUsage(ctx context.Context, roomID, ip, pubkey string, requests, bytesRecv, bytesSent int64, members int)
 	GetMaxRoomParticipants(ctx context.Context) int
 }
 
@@ -521,10 +521,12 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 		replaced.Close()
 	}
 	if s.policy != nil {
-		s.policy.RecordRoomUsage(ctx, roomIDHex, 0, 0, 0, r.count())
+		s.policy.RecordRoomUsage(ctx, roomIDHex, ip, "", 0, 0, 0, r.count())
 	}
 	s.logger.Printf("[server] uuid=%x joined room=%x (members now: %d)", senderID[:4], roomID[:4], r.count())
 
+	// ── Forward loop ─────────────────────────────────────────────────────────
+	trackedPubKey := ""
 	defer func() {
 		r.remove(senderID)
 		if r.isEmpty() {
@@ -534,12 +536,10 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 		}
 		s.logger.Printf("[server] uuid=%x left room=%x (members now: %d)", senderID[:4], roomID[:4], r.count())
 		if s.policy != nil {
-			s.policy.RecordRoomUsage(ctx, roomIDHex, 0, 0, 0, r.count())
+			s.policy.RecordRoomUsage(ctx, roomIDHex, ip, trackedPubKey, 0, 0, 0, r.count())
 		}
 	}()
 
-	// ── Forward loop ─────────────────────────────────────────────────────────
-	trackedPubKey := ""
 	for {
 		select {
 		case <-ctx.Done():
@@ -577,7 +577,7 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 				return
 			}
 			s.policy.RecordNetworkUsage(ctx, ip, trackedPubKey, 1, int64(len(raw)), 0, "tcp", "frame_in")
-			s.policy.RecordRoomUsage(ctx, roomIDHex, 1, int64(len(raw)), 0, r.count())
+			s.policy.RecordRoomUsage(ctx, roomIDHex, ip, trackedPubKey, 1, int64(len(raw)), 0, r.count())
 		}
 
 		s.logger.Printf("[server] relay type=0x%02x from=%x to=%x len=%d",
@@ -590,7 +590,7 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 		}
 		if s.policy != nil {
 			s.policy.RecordNetworkUsage(ctx, ip, trackedPubKey, 0, 0, int64(len(raw)), "tcp", "frame_out")
-			s.policy.RecordRoomUsage(ctx, roomIDHex, 0, 0, int64(len(raw)), r.count())
+			s.policy.RecordRoomUsage(ctx, roomIDHex, ip, trackedPubKey, 0, 0, int64(len(raw)), r.count())
 		}
 	}
 }

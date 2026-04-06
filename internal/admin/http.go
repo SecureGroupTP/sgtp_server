@@ -51,12 +51,17 @@ func (h *HTTPHandler) Register(mux *http.ServeMux) {
 
 	mux.HandleFunc("POST /admin/users", h.requireAuth(h.handleCreateUser))
 	mux.HandleFunc("POST /admin/users/change-password", h.requireAuth(h.handleChangePassword))
+	mux.HandleFunc("GET /admin/admins", h.requireAuth(h.handleListAdmins))
+	mux.HandleFunc("POST /admin/admins/disable", h.requireAuth(h.handleDisableAdmin))
+	mux.HandleFunc("DELETE /admin/admins", h.requireAuth(h.handleDeleteAdmin))
+	mux.HandleFunc("GET /admin/actions", h.requireAuth(h.handleListActions))
 	mux.HandleFunc("GET /admin/users/list", h.requireAuth(h.handleUsersList))
 	mux.HandleFunc("GET /admin/users/info", h.requireAuth(h.handleUserInfo))
 	mux.HandleFunc("GET /admin/users/limit", h.requireAuth(h.handleGetUserLimit))
 	mux.HandleFunc("PUT /admin/users/limit", h.requireAuth(h.handlePutUserLimit))
 	mux.HandleFunc("GET /admin/rooms/list", h.requireAuth(h.handleRoomsList))
 	mux.HandleFunc("GET /admin/rooms/info", h.requireAuth(h.handleRoomInfo))
+	mux.HandleFunc("GET /admin/rooms/users", h.requireAuth(h.handleRoomUsers))
 	mux.HandleFunc("GET /admin/rooms/limit", h.requireAuth(h.handleGetRoomLimit))
 	mux.HandleFunc("PUT /admin/rooms/limit", h.requireAuth(h.handlePutRoomLimit))
 }
@@ -490,6 +495,80 @@ func (h *HTTPHandler) handlePutUserLimit(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func (h *HTTPHandler) handleListAdmins(w http.ResponseWriter, r *http.Request) {
+	items, err := h.svc.ListAdmins(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *HTTPHandler) handleDisableAdmin(w http.ResponseWriter, r *http.Request) {
+	actor := userFromCtx(r.Context())
+	if actor == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+		return
+	}
+	var req struct {
+		UserID   int64 `json:"user_id"`
+		Disabled bool  `json:"disabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	if req.UserID <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "user_id is required"})
+		return
+	}
+	if err := h.svc.SetAdminDisabled(r.Context(), actor, req.UserID, req.Disabled); err != nil {
+		code := http.StatusBadRequest
+		if strings.Contains(strings.ToLower(err.Error()), "forbidden") {
+			code = http.StatusForbidden
+		}
+		writeJSON(w, code, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *HTTPHandler) handleDeleteAdmin(w http.ResponseWriter, r *http.Request) {
+	actor := userFromCtx(r.Context())
+	if actor == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+		return
+	}
+	id, _ := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("id")), 10, 64)
+	if id <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "id is required"})
+		return
+	}
+	if err := h.svc.DeleteAdmin(r.Context(), actor, id); err != nil {
+		code := http.StatusBadRequest
+		if strings.Contains(strings.ToLower(err.Error()), "forbidden") {
+			code = http.StatusForbidden
+		}
+		writeJSON(w, code, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *HTTPHandler) handleListActions(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	actorID, _ := strconv.ParseInt(strings.TrimSpace(q.Get("actor_id")), 10, 64)
+	actionLike := q.Get("action")
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	items, err := h.svc.ListActions(r.Context(), actorID, actionLike, limit, offset)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
 func (h *HTTPHandler) handleRoomsList(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	search := q.Get("search")
@@ -517,6 +596,27 @@ func (h *HTTPHandler) handleRoomInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, info)
+}
+
+func (h *HTTPHandler) handleRoomUsers(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	roomID := strings.TrimSpace(q.Get("room_id"))
+	if roomID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "room_id is required"})
+		return
+	}
+	ipFilter := q.Get("ip")
+	pubFilter := q.Get("public_key")
+	sortBy := q.Get("sort")
+	order := q.Get("order")
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	items, err := h.svc.ListRoomUsers(r.Context(), roomID, ipFilter, pubFilter, sortBy, order, limit, offset)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "limit": limit, "offset": offset})
 }
 
 func (h *HTTPHandler) handleGetRoomLimit(w http.ResponseWriter, r *http.Request) {
