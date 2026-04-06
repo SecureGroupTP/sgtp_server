@@ -1,0 +1,18 @@
+# Git
+.git
+.gitignore
+
+# Docs
+*.md
+*.sh
+
+# Deploy configs (not needed for build)
+deploy/
+db/
+certbot/
+certs/
+
+# Docker files themselves
+Dockerfile
+docker-compose.yml
+.dockerignore
