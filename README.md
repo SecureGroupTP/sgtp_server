@@ -25,6 +25,87 @@ Services and default host ports (see `.env`):
 - `userdir_db` → internal Postgres only (persisted via volume, `127.0.0.1:5432` on host)
 - `flyway` → one-shot migration runner (required; applies `db/migrations/*.sql` before `sgtp_chat`)
 
+## Installation and admin setup
+
+### First run (minimal input)
+
+From `server` directory run:
+
+```bash
+./install.sh
+```
+
+What it does automatically:
+
+- Creates `.env` from `.env.example` if missing
+- Fills required defaults (`NGINX_SERVER_NAME`, `ADMIN_JWT_SECRET`, `ADMIN_BOOTSTRAP_FILE`)
+- Generates self-signed TLS certs in `./certs` if needed
+- Starts Docker stack (`flyway` + `userdir_db` + `sgtp_chat` + nginx/certbot services)
+- Saves bootstrap root credentials to `./admin_bootstrap_credentials.txt` (first launch only)
+
+### Manual setup
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
+
+`flyway` migrations are applied automatically before `sgtp_chat` starts.
+
+### Main `.env` settings you usually change
+
+- `CHAT_TCP_PORT` — SGTP TCP port
+- `CHAT_HTTP_PORT` — HTTP port (admin API/UI and HTTP transport)
+- `CHAT_WS_PORT` — WebSocket port
+- `NGINX_SERVER_NAME` — domain for nginx/certs (`localhost` for local setup)
+- `ADMIN_JWT_SECRET` — required for stable admin auth tokens (set explicit value in production)
+- `TLS_CERT_FILE` + `TLS_KEY_FILE` — cert/key paths inside container (`/certs/...` by default)
+
+### How to enter admin panel
+
+1. Open `http://<host>:<CHAT_HTTP_PORT>/admin` (default: `http://localhost:8080/admin`).
+2. Read first root credentials from `./admin_bootstrap_credentials.txt`.
+3. Login via API:
+
+```bash
+curl -sS http://localhost:8080/admin/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"login_name":"<BOOTSTRAP_ROOT_LOGIN>","password":"<BOOTSTRAP_ROOT_PASSWORD>"}'
+```
+
+Response contains:
+
+- `access_token` (Bearer token for protected `/admin/*` endpoints)
+- `refresh_token`
+- user info
+
+4. Change root password after first login:
+
+```bash
+curl -sS http://localhost:8080/admin/users/change-password \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -H 'Content-Type: application/json' \
+  -d '{"new_password":"<NEW_STRONG_PASSWORD>"}'
+```
+
+### Basic admin operations
+
+- Create additional admin (root only): `POST /admin/users`
+- Update access mode (`open|whitelist|password|key`): `PUT /admin/settings/access`
+- Update limits (per IP / per public_key): `PUT /admin/limits`
+- Add/remove bans: `POST /admin/bans`, `DELETE /admin/bans?id=<id>`
+- Trigger/list backups: `POST /admin/backups/run`, `GET /admin/backups`
+- View usage: `GET /admin/stats/usage`
+
+### Apply config changes
+
+- Network settings saved via `PUT /admin/settings/network` are persisted in DB.
+- Apply them with graceful restart:
+
+```bash
+docker compose restart sgtp_chat
+```
+
 ## User directory: connecting on a relay port
 
 To speak the userdir protocol, the client connects to any relay port (chat or voice) and sends **exactly 32 zero bytes** as a routing prefix before the first userdir frame:
