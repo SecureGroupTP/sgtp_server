@@ -2,7 +2,18 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SERVER_DIR="$ROOT_DIR/server"
+
+# Support both layouts:
+# 1) repo root is current directory (contains .env.example, docker-compose.yml)
+# 2) monorepo root with nested ./server directory.
+if [[ -f "$ROOT_DIR/.env.example" && -f "$ROOT_DIR/docker-compose.yml" ]]; then
+  SERVER_DIR="$ROOT_DIR"
+elif [[ -f "$ROOT_DIR/server/.env.example" && -f "$ROOT_DIR/server/docker-compose.yml" ]]; then
+  SERVER_DIR="$ROOT_DIR/server"
+else
+  SERVER_DIR="$ROOT_DIR"
+fi
+
 ENV_EXAMPLE="$SERVER_DIR/.env.example"
 ENV_FILE="$SERVER_DIR/.env"
 
