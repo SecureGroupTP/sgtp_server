@@ -725,6 +725,7 @@ WITH grouped AS (
     COALESCE(NULLIF(public_key,''), '') AS public_key,
     STRING_AGG(DISTINCT ip, ', ' ORDER BY ip) AS ips
   FROM client_activity
+  WHERE COALESCE(NULLIF(public_key,''), '') <> ''
   GROUP BY
     CASE WHEN COALESCE(public_key,'') <> '' THEN COALESCE(public_key,'')
          ELSE CONCAT('ip:', ip) END,

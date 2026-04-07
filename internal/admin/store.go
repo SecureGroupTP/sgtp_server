@@ -603,7 +603,7 @@ func (s *Store) ListUsersDetailed(ctx context.Context, search, ipFilter, pubFilt
 		order = "ASC"
 	}
 
-	q := fmt.Sprintf(`
+q := fmt.Sprintf(`
 WITH grouped AS (
   SELECT
     CASE WHEN COALESCE(public_key,'') <> '' THEN COALESCE(public_key,'')
@@ -617,13 +617,28 @@ WITH grouped AS (
     SUM(bytes_sent) AS bytes_sent,
     (SUM(bytes_recv) + SUM(bytes_sent)) AS summary_data
   FROM client_activity
+  WHERE COALESCE(NULLIF(public_key,''), '') <> ''
   GROUP BY
     CASE WHEN COALESCE(public_key,'') <> '' THEN COALESCE(public_key,'')
          ELSE CONCAT('ip:', ip) END,
     COALESCE(NULLIF(public_key,''), '')
 )
-SELECT user_key, public_key, ips, first_use, last_use, requests, bytes_recv, bytes_sent, summary_data
-FROM grouped
+SELECT
+  g.user_key,
+  g.public_key,
+  g.ips,
+  g.first_use,
+  g.last_use,
+  g.requests,
+  g.bytes_recv,
+  g.bytes_sent,
+  g.summary_data,
+  COALESCE(up.username, '') AS username,
+  COALESCE(up.fullname, '') AS fullname
+FROM grouped g
+LEFT JOIN user_profiles up
+  ON g.public_key ~ '^[0-9A-Fa-f]{64}$'
+ AND up.pubkey = decode(g.public_key, 'hex')
 WHERE ($1 = '' OR user_key ILIKE $1 OR ips ILIKE $1)
   AND ($2 = '' OR ips ILIKE $2)
   AND ($3 = '' OR public_key ILIKE $3)
@@ -644,9 +659,10 @@ LIMIT $4 OFFSET $5
 	out := make([]map[string]any, 0, limit)
 	for rows.Next() {
 		var userKey, pub, ips string
+		var username, fullname string
 		var first, last time.Time
 		var req, br, bs, sum int64
-		if err := rows.Scan(&userKey, &pub, &ips, &first, &last, &req, &br, &bs, &sum); err != nil {
+		if err := rows.Scan(&userKey, &pub, &ips, &first, &last, &req, &br, &bs, &sum, &username, &fullname); err != nil {
 			return nil, err
 		}
 		out = append(out, map[string]any{
@@ -659,6 +675,8 @@ LIMIT $4 OFFSET $5
 			"bytes_recv":   br,
 			"bytes_sent":   bs,
 			"summary_data": sum,
+			"username":     username,
+			"name":         fullname,
 		})
 	}
 	return out, rows.Err()
@@ -679,13 +697,28 @@ WITH grouped AS (
     SUM(bytes_sent) AS bytes_sent,
     (SUM(bytes_recv) + SUM(bytes_sent)) AS summary_data
   FROM client_activity
+  WHERE COALESCE(NULLIF(public_key,''), '') <> ''
   GROUP BY
     CASE WHEN COALESCE(public_key,'') <> '' THEN COALESCE(public_key,'')
          ELSE CONCAT('ip:', ip) END,
     COALESCE(NULLIF(public_key,''), '')
 )
-SELECT user_key, public_key, ips, first_use, last_use, requests, bytes_recv, bytes_sent, summary_data
-FROM grouped
+SELECT
+  g.user_key,
+  g.public_key,
+  g.ips,
+  g.first_use,
+  g.last_use,
+  g.requests,
+  g.bytes_recv,
+  g.bytes_sent,
+  g.summary_data,
+  COALESCE(up.username, '') AS username,
+  COALESCE(up.fullname, '') AS fullname
+FROM grouped g
+LEFT JOIN user_profiles up
+  ON g.public_key ~ '^[0-9A-Fa-f]{64}$'
+ AND up.pubkey = decode(g.public_key, 'hex')
 WHERE user_key = $1
 LIMIT 1
 `
@@ -693,9 +726,10 @@ LIMIT 1
 	var out map[string]any
 	{
 		var k, pub, ips string
+		var username, fullname string
 		var first, last time.Time
 		var req, br, bs, sum int64
-		if err := row.Scan(&k, &pub, &ips, &first, &last, &req, &br, &bs, &sum); err != nil {
+		if err := row.Scan(&k, &pub, &ips, &first, &last, &req, &br, &bs, &sum, &username, &fullname); err != nil {
 			return nil, err
 		}
 		out = map[string]any{
@@ -708,6 +742,8 @@ LIMIT 1
 			"bytes_recv":   br,
 			"bytes_sent":   bs,
 			"summary_data": sum,
+			"username":     username,
+			"name":         fullname,
 		}
 	}
 	return out, nil
