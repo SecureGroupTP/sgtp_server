@@ -72,17 +72,17 @@ func TestMain(m *testing.M) {
 
 func runMigrations(db *sql.DB) error {
 	migrationsDir := findMigrationsDir()
-
-	// V1-V6 run as-is.
-	v1to6 := []string{
+	files := []string{
 		"V1__userdir_baseline.sql",
 		"V2__admin_control_plane.sql",
 		"V3__client_activity_dedup_and_pubkey_normalize.sql",
 		"V4__usage_subject_limits.sql",
 		"V5__room_activity_and_extended_constraints.sql",
 		"V6__room_user_activity.sql",
+		"V7__admin_panel_v2.sql",
+		"V8__userdir_profiles_table.sql",
 	}
-	for _, f := range v1to6 {
+	for _, f := range files {
 		content, err := os.ReadFile(filepath.Join(migrationsDir, f))
 		if err != nil {
 			return fmt.Errorf("read %s: %w", f, err)
@@ -90,40 +90,6 @@ func runMigrations(db *sql.DB) error {
 		if _, err := db.Exec(string(content)); err != nil {
 			return fmt.Errorf("exec %s: %w", f, err)
 		}
-	}
-
-	// V7 references userdir_profiles but V1 creates user_profiles — rename first.
-	_, _ = db.Exec(`ALTER TABLE IF EXISTS user_profiles RENAME TO userdir_profiles`)
-	// Add public_key text column to match store queries (V1 uses pubkey bytea).
-	_, _ = db.Exec(`ALTER TABLE userdir_profiles ADD COLUMN IF NOT EXISTS public_key TEXT DEFAULT ''`)
-	_, _ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS userdir_profiles_pubkey_text ON userdir_profiles (public_key) WHERE public_key <> ''`)
-
-	// V7 contains partial indexes with now() which Postgres rejects (not IMMUTABLE).
-	// Strip those problematic CREATE INDEX lines and run the rest of V7.
-	v7Content, err := os.ReadFile(filepath.Join(migrationsDir, "V7__admin_panel_v2.sql"))
-	if err != nil {
-		return fmt.Errorf("read V7: %w", err)
-	}
-	v7SQL := string(v7Content)
-	// Remove the four partial indexes that use now().
-	for _, idx := range []string{
-		"CREATE INDEX idx_user_bans_active",
-		"CREATE INDEX idx_ip_bans_active",
-		"CREATE INDEX idx_room_bans_active",
-		"CREATE INDEX idx_user_room_bans_active",
-	} {
-		lines := strings.Split(v7SQL, "\n")
-		var filtered []string
-		for _, line := range lines {
-			if strings.Contains(line, idx) {
-				continue
-			}
-			filtered = append(filtered, line)
-		}
-		v7SQL = strings.Join(filtered, "\n")
-	}
-	if _, err := db.Exec(v7SQL); err != nil {
-		return fmt.Errorf("exec V7: %w", err)
 	}
 	return nil
 }
