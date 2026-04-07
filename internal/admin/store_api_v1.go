@@ -1021,10 +1021,27 @@ func (s *Store) ListRoomParticipantsOnline(ctx context.Context, roomUUID string,
 		onlineTimeoutSec = 60
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT ip, COALESCE(public_key,''), last_use, requests, bytes_recv, bytes_sent
-FROM room_user_activity
-WHERE room_id = $1 AND last_use > now() - make_interval(secs => $2)
-ORDER BY last_use DESC
+SELECT
+  ru.ip,
+  COALESCE(ru.public_key,''),
+  ru.last_use,
+  ru.requests,
+  ru.bytes_recv,
+  ru.bytes_sent,
+  COALESCE(up.username, '') AS username,
+  COALESCE(up.fullname, '') AS fullname
+FROM room_user_activity ru
+LEFT JOIN user_profiles up
+  ON up.pubkey = (
+    CASE
+      WHEN ru.public_key ~ '^[0-9A-Fa-f]{64}$' THEN decode(ru.public_key, 'hex')
+      ELSE NULL::bytea
+    END
+  )
+WHERE ru.room_id = $1
+  AND ru.last_use > now() - make_interval(secs => $2)
+  AND COALESCE(ru.public_key, '') <> ''
+ORDER BY ru.last_use DESC
 `, roomUUID, onlineTimeoutSec)
 	if err != nil {
 		return nil, err
@@ -1033,14 +1050,17 @@ ORDER BY last_use DESC
 	out := make([]map[string]any, 0, 16)
 	for rows.Next() {
 		var ip, pub string
+		var username, fullname string
 		var last time.Time
 		var req, br, bs int64
-		if err := rows.Scan(&ip, &pub, &last, &req, &br, &bs); err != nil {
+		if err := rows.Scan(&ip, &pub, &last, &req, &br, &bs, &username, &fullname); err != nil {
 			return nil, err
 		}
 		out = append(out, map[string]any{
 			"ip":         ip,
 			"public_key": pub,
+			"username":   username,
+			"name":       fullname,
 			"last_use":   last,
 			"requests":   req,
 			"bytes_recv": br,

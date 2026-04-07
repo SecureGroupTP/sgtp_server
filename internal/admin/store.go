@@ -962,18 +962,28 @@ func (s *Store) ListRoomUsers(ctx context.Context, roomID, ipFilter, pubFilter, 
 	}
 	q := fmt.Sprintf(`
 SELECT
-  ip,
-  COALESCE(public_key, '') AS public_key,
-  first_use,
-  last_use,
-  requests,
-  bytes_recv,
-  bytes_sent,
-  (bytes_recv + bytes_sent) AS summary_data
-FROM room_user_activity
-WHERE room_id = $1
-  AND ($2 = '' OR ip ILIKE $2)
-  AND ($3 = '' OR public_key ILIKE $3)
+  ru.ip,
+  COALESCE(ru.public_key, '') AS public_key,
+  ru.first_use,
+  ru.last_use,
+  ru.requests,
+  ru.bytes_recv,
+  ru.bytes_sent,
+  (ru.bytes_recv + ru.bytes_sent) AS summary_data,
+  COALESCE(up.username, '') AS username,
+  COALESCE(up.fullname, '') AS fullname
+FROM room_user_activity ru
+LEFT JOIN user_profiles up
+  ON up.pubkey = (
+    CASE
+      WHEN ru.public_key ~ '^[0-9A-Fa-f]{64}$' THEN decode(ru.public_key, 'hex')
+      ELSE NULL::bytea
+    END
+  )
+WHERE ru.room_id = $1
+  AND COALESCE(ru.public_key, '') <> ''
+  AND ($2 = '' OR ru.ip ILIKE $2)
+  AND ($3 = '' OR ru.public_key ILIKE $3)
 ORDER BY %s %s, last_use DESC
 LIMIT $4 OFFSET $5
 `, sortColumn, order)
@@ -985,14 +995,17 @@ LIMIT $4 OFFSET $5
 	out := make([]map[string]any, 0, limit)
 	for rows.Next() {
 		var ip, pub string
+		var username, fullname string
 		var first, last time.Time
 		var req, br, bs, sum int64
-		if err := rows.Scan(&ip, &pub, &first, &last, &req, &br, &bs, &sum); err != nil {
+		if err := rows.Scan(&ip, &pub, &first, &last, &req, &br, &bs, &sum, &username, &fullname); err != nil {
 			return nil, err
 		}
 		out = append(out, map[string]any{
 			"ip":           ip,
 			"public_key":   pub,
+			"username":     username,
+			"name":         fullname,
 			"first_use":    first,
 			"last_use":     last,
 			"requests":     req,
