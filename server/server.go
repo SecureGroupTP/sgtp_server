@@ -247,6 +247,9 @@ type Server struct {
 	closing   chan struct{}
 
 	wg sync.WaitGroup
+
+	identityMu sync.RWMutex
+	uuidToPub  map[[16]byte]string
 }
 
 // New creates a Server that will listen on addr (e.g. ":7777").
@@ -266,6 +269,7 @@ func New(addr string, logger *log.Logger, ud *userdir.Server) *Server {
 		rooms:       make(map[[16]byte]*room),
 		conns:       make(map[*conn]struct{}),
 		closing:     make(chan struct{}),
+		uuidToPub:   make(map[[16]byte]string),
 	}
 }
 
@@ -526,7 +530,7 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 	s.logger.Printf("[server] uuid=%x joined room=%x (members now: %d)", senderID[:4], roomID[:4], r.count())
 
 	// ── Forward loop ─────────────────────────────────────────────────────────
-	trackedPubKey := ""
+	trackedPubKey := s.lookupPubKey(senderID)
 	defer func() {
 		r.remove(senderID)
 		if r.isEmpty() {
@@ -565,6 +569,7 @@ func (s *Server) handleConn(ctx context.Context, nc net.Conn) {
 			}
 			if pk, ok := extractPubKeyFromFrame(raw, fhdr); ok {
 				trackedPubKey = pk
+				s.rememberPubKey(senderID, pk)
 			}
 			if trackedPubKey != "" {
 				if err := s.policy.CheckSubjectAllowed(ctx, "public_key", trackedPubKey); err != nil {
@@ -631,6 +636,22 @@ func parseRemoteIP(remote string) string {
 		return remote
 	}
 	return host
+}
+
+func (s *Server) rememberPubKey(uuid [16]byte, pubkey string) {
+	if pubkey == "" {
+		return
+	}
+	s.identityMu.Lock()
+	s.uuidToPub[uuid] = pubkey
+	s.identityMu.Unlock()
+}
+
+func (s *Server) lookupPubKey(uuid [16]byte) string {
+	s.identityMu.RLock()
+	pk := s.uuidToPub[uuid]
+	s.identityMu.RUnlock()
+	return pk
 }
 
 // extractPubKeyFromFrame tries to recover sender Ed25519 pubkey from SGTP
