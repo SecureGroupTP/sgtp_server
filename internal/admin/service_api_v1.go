@@ -21,7 +21,7 @@ func (s *Service) CreateInviteLink(ctx context.Context, actorID int64, ttlHours 
 	if err != nil {
 		return nil, err
 	}
-	username, err := RandomToken(8)
+	username, err := RandomToken(12)
 	if err != nil {
 		return nil, err
 	}

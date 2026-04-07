@@ -458,7 +458,7 @@ func (s *Store) ListBackupJobs(ctx context.Context, limit int) ([]BackupJob, err
 		limit = 20
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, status, output_path, started_at, finished_at, COALESCE(error_message,''), created_at
+SELECT id, status, COALESCE(output_path,''), started_at, finished_at, COALESCE(error_message,''), created_at
 FROM backup_jobs
 ORDER BY id DESC
 LIMIT $1
