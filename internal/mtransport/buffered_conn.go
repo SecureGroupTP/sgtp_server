@@ -179,9 +179,13 @@ func (c *bufferedConn) SetWriteDeadline(time.Time) error { return nil }
 
 // newBufferedConnPair returns two net.Conn ends connected to each other in
 // memory. Each direction has a bounded buffer; when full, writes fail.
-func newBufferedConnPair(maxBufferedBytesPerDir int) (serverSide net.Conn, clientSide net.Conn) {
+// peerIP is used as RemoteAddr() on serverSide for accounting/limits.
+func newBufferedConnPair(maxBufferedBytesPerDir int, peerIP string) (serverSide net.Conn, clientSide net.Conn) {
 	a2b := newPipeDir(maxBufferedBytesPerDir)
 	b2a := newPipeDir(maxBufferedBytesPerDir)
+	if peerIP == "" {
+		peerIP = "client"
+	}
 
 	var once sync.Once
 	closeBoth := func() {
@@ -193,7 +197,7 @@ func newBufferedConnPair(maxBufferedBytesPerDir int) (serverSide net.Conn, clien
 		rd:        b2a,
 		wr:        a2b,
 		local:     dummyAddr("server"),
-		remote:    dummyAddr("client"),
+		remote:    dummyAddr(peerIP),
 		closeOnce: &once,
 		closeFn:   closeBoth,
 	}

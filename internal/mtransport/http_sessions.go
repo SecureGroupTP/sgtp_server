@@ -136,7 +136,7 @@ func (m *HTTPSessionManager) handleCreateSession(w http.ResponseWriter, r *http.
 		return
 	}
 
-	serverNC, clientNC := newBufferedConnPair(m.bufferBytes)
+	serverNC, clientNC := newBufferedConnPair(m.bufferBytes, clientIPFromRequest(r))
 	sess := &httpSession{
 		id:        sid,
 		serverNC:  serverNC,
@@ -164,6 +164,33 @@ func (m *HTTPSessionManager) handleCreateSession(w http.ResponseWriter, r *http.
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(sid[:])
+}
+
+func clientIPFromRequest(r *http.Request) string {
+	// Prefer the left-most X-Forwarded-For hop (original client).
+	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+		first := strings.TrimSpace(strings.Split(xff, ",")[0])
+		if ip := net.ParseIP(first); ip != nil {
+			return ip.String()
+		}
+	}
+	// Fall back to X-Real-IP.
+	if xrip := strings.TrimSpace(r.Header.Get("X-Real-IP")); xrip != "" {
+		if ip := net.ParseIP(xrip); ip != nil {
+			return ip.String()
+		}
+	}
+	// Last resort: socket remote address.
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err == nil {
+		if ip := net.ParseIP(host); ip != nil {
+			return ip.String()
+		}
+	}
+	if ip := net.ParseIP(strings.TrimSpace(r.RemoteAddr)); ip != nil {
+		return ip.String()
+	}
+	return "client"
 }
 
 func (m *HTTPSessionManager) handleDeleteSession(w http.ResponseWriter, r *http.Request) {

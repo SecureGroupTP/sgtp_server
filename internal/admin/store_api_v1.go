@@ -775,8 +775,41 @@ func (s *Store) ChainDetect(ctx context.Context, publicKey string, maxDepth int)
 		Depth    int    `json:"depth"`
 	}
 
-	visited := map[string]bool{publicKey: true}
-	frontier := []string{publicKey}
+	frontier := make([]string, 0, 8)
+	visited := make(map[string]bool, 8)
+	if strings.HasPrefix(publicKey, "ip:") {
+		ip := strings.TrimPrefix(publicKey, "ip:")
+		rows, err := s.db.QueryContext(ctx, `
+SELECT DISTINCT public_key
+FROM client_activity
+WHERE ip = $1 AND COALESCE(public_key, '') <> ''
+`, ip)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var pk string
+			if err := rows.Scan(&pk); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if strings.TrimSpace(pk) == "" {
+				continue
+			}
+			visited[pk] = true
+			frontier = append(frontier, pk)
+		}
+		rows.Close()
+		if rows.Err() != nil {
+			return nil, rows.Err()
+		}
+	} else {
+		visited[publicKey] = true
+		frontier = append(frontier, publicKey)
+	}
+	if len(frontier) == 0 {
+		return []map[string]any{}, nil
+	}
 	var edges []map[string]any
 
 	for depth := 1; depth <= maxDepth && len(frontier) > 0; depth++ {
@@ -840,6 +873,48 @@ WHERE a.public_key IN (%s)
 // ════════════════════════════════════════════════════════════════════
 
 func (s *Store) ListUserIPs(ctx context.Context, publicKey string) ([]map[string]any, error) {
+	if strings.HasPrefix(publicKey, "ip:") {
+		ip := strings.TrimPrefix(publicKey, "ip:")
+		rows, err := s.db.QueryContext(ctx, `
+SELECT ip, MIN(first_use) AS first_use, MAX(last_use) AS last_use,
+       SUM(requests) AS requests, SUM(bytes_recv) AS bytes_recv, SUM(bytes_sent) AS bytes_sent,
+       EXISTS(
+         SELECT 1 FROM ip_bans b
+         WHERE b.ip_address = $1
+           AND b.unbanned_at IS NULL
+           AND (b.expires_at IS NULL OR b.expires_at > now())
+       ) AS is_banned
+FROM client_activity
+WHERE ip = $1
+GROUP BY ip
+ORDER BY MAX(last_use) DESC
+`, ip)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		out := make([]map[string]any, 0, 4)
+		for rows.Next() {
+			var ipRow string
+			var first, last time.Time
+			var req, br, bs int64
+			var isBanned bool
+			if err := rows.Scan(&ipRow, &first, &last, &req, &br, &bs, &isBanned); err != nil {
+				return nil, err
+			}
+			out = append(out, map[string]any{
+				"ip":         ipRow,
+				"first_use":  first,
+				"last_use":   last,
+				"requests":   req,
+				"bytes_recv": br,
+				"bytes_sent": bs,
+				"is_banned":  isBanned,
+			})
+		}
+		return out, rows.Err()
+	}
+
 	rows, err := s.db.QueryContext(ctx, `
 SELECT ip, first_use, last_use, requests, bytes_recv, bytes_sent
 FROM client_activity
@@ -871,6 +946,44 @@ ORDER BY last_use DESC
 }
 
 func (s *Store) ListUserRooms(ctx context.Context, publicKey string) ([]map[string]any, error) {
+	if strings.HasPrefix(publicKey, "ip:") {
+		ip := strings.TrimPrefix(publicKey, "ip:")
+		rows, err := s.db.QueryContext(ctx, `
+SELECT room_id,
+       MIN(first_use) AS first_use,
+       MAX(last_use) AS last_use,
+       SUM(requests) AS requests,
+       SUM(bytes_recv) AS bytes_recv,
+       SUM(bytes_sent) AS bytes_sent
+FROM room_user_activity
+WHERE ip = $1
+GROUP BY room_id
+ORDER BY MAX(last_use) DESC
+`, ip)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		out := make([]map[string]any, 0, 16)
+		for rows.Next() {
+			var roomID string
+			var first, last time.Time
+			var req, br, bs int64
+			if err := rows.Scan(&roomID, &first, &last, &req, &br, &bs); err != nil {
+				return nil, err
+			}
+			out = append(out, map[string]any{
+				"room_id":    roomID,
+				"first_use":  first,
+				"last_use":   last,
+				"requests":   req,
+				"bytes_recv": br,
+				"bytes_sent": bs,
+			})
+		}
+		return out, rows.Err()
+	}
+
 	rows, err := s.db.QueryContext(ctx, `
 SELECT room_id, first_use, last_use, requests, bytes_recv, bytes_sent
 FROM room_user_activity
